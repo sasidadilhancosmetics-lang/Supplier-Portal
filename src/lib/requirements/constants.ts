@@ -1,0 +1,1 @@
+export const REQUIREMENT_PAGE_SIZE = 20;
