@@ -17,6 +17,16 @@ Project: `holy-art-38015209` (org `org-misty-glade-04808036`). Local link file: 
 
 Never commit `.env.local`. Never hardcode credentials.
 
+### Branches
+
+| Branch | ID | Notes |
+| --- | --- | --- |
+| production | `br-fancy-voice-b33wenqw` | Default branch. Never migrate or modify without explicit approval. |
+| development | `br-morning-glade-b3odmb6e` | Endpoint `ep-little-credit-b35km102`. **No expiration date.** |
+| rehearsal-phase-b-20261112 | `br-hidden-cake-b3s3sjyz` | Disposable child of development for the Phase B migration rehearsal (endpoint `ep-muddy-bird-b3hsfby3`). Delete after review. |
+
+**Development expiry removed (2026-11-12, user-approved):** development was created with `expires_at = 2026-11-18T09:06:03Z`, which would have auto-deleted the branch and its data (including UAT data and confirmed purchase orders). Neon also refuses to create child branches (rehearsal, backup) from a branch with an expiration date. The expiry was removed with `neon branches set-expiration br-morning-glade-b3odmb6e --project-id holy-art-38015209` (no `--expires-at`). Only branch metadata changed; no schema or data. Do not set an expiry on development again without approval — it blocks backup branches.
+
 **Important:** A process-level `DATABASE_URL` (for example a local Postgres URL in the shell or OS env) **shadows** `.env.local` in Next.js and many Node tools. For this app, clear it before `next dev` / `next start` if health checks fail against localhost:
 
 ```powershell
@@ -45,6 +55,8 @@ Server client: `src/lib/db.ts` (import `server-only`; do not use from Client Com
 5. Stage 3A mapping table: `prisma/migrations/20261111153000_external_identity/` — applied on development after approval.
 6. Stage 4B invitations: `prisma/migrations/20261111183000_supplier_invitation/` — applied on development after approval.
 7. Stage 4C self-registration: `prisma/migrations/20261112040000_supplier_self_registration/` — applied on development after approval.
+8. Stage 5B requests/availability: `prisma/migrations/20261112060000_stage5b_requests_availability/` — applied on development after approval.
+9. Phase B OSF import review: `prisma/migrations/20261112120000_phase_b_osf_import_review/` — applied on development after rehearsal + approval. Production not migrated.
 
 ### Applied migration (Stage 3A)
 
@@ -76,6 +88,19 @@ Server client: `src/lib/db.ts` (import `server-only`; do not use from Client Com
 | Migration | `20261112040000_supplier_self_registration` |
 | Change | `REJECTED` status, `SupplierRegistrationSource`, rejection/review columns |
 
+### Applied migration (Phase B — OSF import review)
+
+| Field | Value |
+| --- | --- |
+| Neon project | `holy-art-38015209` |
+| Applied on | **development** (`br-morning-glade-b3odmb6e`, endpoint `ep-little-credit-b35km102`) |
+| Not applied | production (`br-fancy-voice-b33wenqw`) |
+| Migration | `20261112120000_phase_b_osf_import_review` |
+| SHA256 | `F9A5A2F181F2DBCBDBEBDDF5C03FA34054EAF822F1B2DA6EBB91182E9FAFC278` |
+| Rehearsal | `rehearsal-phase-b-20261112` (`br-hidden-cake-b3s3sjyz`) — kept for review |
+| Backup | `backup-pre-phase-b-20261113` (`br-shy-river-b34hfq0v`, endpoint `ep-billowing-firefly-b35jknx2`) — kept |
+| Change | `OsfImportLine`, `OsfImportDistribution`, `IntegrationCredential`; `OsfImport` review columns; enum additions including `SKIPPED_ALREADY_REQUESTED`; composite company-isolation FKs; 16 CHECK constraints (Prisma does not model them — see [decisions.md](decisions.md)) |
+
 ## Verification checklist
 
 - [x] `npx prisma validate` passes  
@@ -84,6 +109,8 @@ Server client: `src/lib/db.ts` (import `server-only`; do not use from Client Com
 - [x] Migration `20261111153000_external_identity` applied on **development** (`br-morning-glade-b3odmb6e`)  
 - [x] Migration `20261111183000_supplier_invitation` applied on **development** (`br-morning-glade-b3odmb6e`)  
 - [x] Migration `20261112040000_supplier_self_registration` applied on **development** (`br-morning-glade-b3odmb6e`)  
+- [x] Migration `20261112060000_stage5b_requests_availability` applied on **development** (`br-morning-glade-b3odmb6e`)  
+- [x] Migration `20261112120000_phase_b_osf_import_review` applied on **development** (`br-morning-glade-b3odmb6e`) after rehearsal  
 - [x] `GET /api/health/db` returns `{ "ok": true, "database": "up" }`  
 - [x] `npm run lint`, `npm run typecheck`, `npm run build` pass  
 

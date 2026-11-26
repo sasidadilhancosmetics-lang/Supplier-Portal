@@ -60,6 +60,16 @@ Cosmo OS / OSF and ERP field names, auth schemes, and endpoints are unknown. No 
 - Confirmed requirements are not silently editable; confirm uses an atomic status claim.
 - See [requirements-management.md](requirements-management.md). No schema migration.
 
+## Order allocation (Stage 6A1) and confirmation (Stage 6A2)
+
+- Create `PurchaseOrder` (`SENT`) + `OrderItem` lines from submitted availability; every line requires `availabilityOfferId`.
+- **Requirement-level concurrency:** `SELECT … FOR UPDATE` on touched `RequirementItem` ids (sorted), then offers (sorted); recalculate coverage after locks so normal in-plan allocations cannot collectively exceed remaining plan across suppliers.
+- Idempotency: existing `IdempotencyKey` with payload hash in `responseJson`, claim+complete in the same transaction, **30-day** retention; same key+hash replays; mismatch rejected.
+- Audit: `AuditLog.entityType` is a string — use `"PurchaseOrder"` (TypeScript union only). **No migration.**
+- Calendar `availableDate` copied to `originalExpectedDeliveryAt` without timezone shift; reserves stay UTC instants and are not moved.
+- **6A2:** supplier whole-order confirm `SENT → CONFIRMED` (`confirmedAt`, `version++`); ownership by session `supplierId`; confirm idempotency scope `po.confirm:{actorUserId}`; notify ADMIN + ALLOCATE_ORDER staff + allocate actor; staff cannot confirm for suppliers.
+- **6A3:** supplier-only cancel of `SENT`/`CONFIRMED`; mandatory reason ≤500; release `quantityOrderedActive` + `ORDER_ALLOCATION_RELEASED`; preserve reserves; reject `DELIVERY_HOLD`; idempotency `po.cancel:{actorUserId}` bound to reason; staff re-request via existing distribute (no auto-reallocation). See [orders-allocation.md](orders-allocation.md).
+
 ## Supplier requests & availability (Stage 5B)
 
 - Draft editing uses `MANAGE_REQUIREMENTS`; confirm stays `CONFIRM_REQUIREMENT`. Idempotent backfill after migration for existing CONFIRM grants.
@@ -67,7 +77,8 @@ Cosmo OS / OSF and ERP field names, auth schemes, and endpoints are unknown. No 
 - Reserve = `reservedAt + 7×24h` UTC; no clock reset while status remains `SUBMITTED`; fresh clock only when re-entering `SUBMITTED` after `EXPIRED` / `CANCELLED` / `NOT_AVAILABLE` / `DRAFT`.
 - Zero qty / not available → `NOT_AVAILABLE` (no reserve). Unanswered lines stay pending.
 - Optional `SupplierRequest.responseDeadline`. Staff review is read-only. Migration: `20261112060000_stage5b_requests_availability` (development after approval). See [supplier-requests-availability.md](supplier-requests-availability.md).
-- Delivery `availableDate` is calendar-day semantics on a DateTime column (UTC midnight + UTC display); no column migration. Brand UI palette: electric green `#39FF14`, white `#FFFFFF`, black `#050505` via CSS tokens in `globals.css`.
+- Delivery `availableDate` is calendar-day semantics on a DateTime column (UTC midnight + UTC display); no column migration.
+- UI is **dark-first**: background `#050505`, cards `#141414`, secondary `#1E1E1E`, borders `#303030`, text `#FFFFFF` / muted `#A3A3A3`, primary accent `#39FF14` with black label text. Tokens live in `globals.css` (`html.dark`); do not mix light layouts.
 
 ## Supplier self-registration (Stage 4C)
 
@@ -123,6 +134,41 @@ Where practical, child rows use composite foreign keys on `(parentId, supplierId
 ### Provisional products (Stage 2A final)
 
 `Product.masterStatus` is `PROVISIONAL` or `ERP_LINKED`. Offer-to-order may create provisional portal products only; it does not create ERP master items.
+
+## Phase B OSF import review (schema on development)
+
+Applied after rehearsal on a disposable child branch, then to development only (`20261112120000_phase_b_osf_import_review`). Production not migrated. Application ingest / Import Review / distribute (Phases C–H) are **not** started by this decision.
+
+Confirmed schema rules:
+
+- One brand-scoped requirement per import (`Requirement` unique on `(osfImportId, brandId)`; NULL import = manual drafts unconstrained).
+- No `SupplierRequest` database uniqueness for “one open request per supplier”. Additional availability requests remain an application-level concern so a permanent DB partial index cannot block them.
+- Distribution ledger unique on `(osfImportId, requirementId)` with statuses `IN_PROGRESS` / `SUCCEEDED` / `SKIPPED_ALREADY_REQUESTED` / `FAILED`. Skipped is a terminal no-new-requests outcome, not a failure.
+- Multiple active `IntegrationCredential` rows per company/cosmo binding are allowed (token rotation); revoke sets `revokedAt` + `isActive=false` together.
+- Ingest never auto-creates products/brands; unmatched lines stay visible (`UNKNOWN_*` / `REJECTED_*` / `EXCLUDED`).
+
+### CHECK constraints (not modelled by Prisma)
+
+Prisma migrate diff ignores these. Do **not** drop them in future migrations. Assert with `pg_constraint` / the Phase B verify script after any schema change.
+
+| Constraint | Table |
+| --- | --- |
+| `OsfImport_version_positive_chk` | OsfImport |
+| `OsfImport_confirmed_fields_chk` | OsfImport |
+| `OsfImportLine_sourceIndex_nonneg_chk` | OsfImportLine |
+| `OsfImportLine_quantityProposed_nonneg_chk` | OsfImportLine |
+| `OsfImportLine_quantityPlanned_nonneg_chk` | OsfImportLine |
+| `OsfImportLine_version_positive_chk` | OsfImportLine |
+| `OsfImportLine_matched_requires_product_chk` | OsfImportLine |
+| `OsfImportLine_item_link_chk` | OsfImportLine |
+| `OsfImportDistribution_attemptCount_nonneg_chk` | OsfImportDistribution |
+| `OsfImportDistribution_version_positive_chk` | OsfImportDistribution |
+| `OsfImportDistribution_in_progress_claim_chk` | OsfImportDistribution |
+| `OsfImportDistribution_terminal_no_claim_chk` | OsfImportDistribution |
+| `OsfImportDistribution_succeeded_fields_chk` | OsfImportDistribution |
+| `OsfImportDistribution_skipped_fields_chk` | OsfImportDistribution |
+| `OsfImportDistribution_failed_fields_chk` | OsfImportDistribution |
+| `IntegrationCredential_revoked_inactive_chk` | IntegrationCredential |
 
 ## Open
 

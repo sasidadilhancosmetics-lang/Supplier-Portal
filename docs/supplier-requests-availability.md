@@ -8,7 +8,9 @@
 - Company review of sent requests and responses
 - Audit logs + in-app notifications
 
-**Not in 5B:** purchase orders, allocation writes, deliveries, GRN, live Cosmo/ERP APIs.
+**Not in 5B:** purchase order writes (see Stage 6A1), deliveries, GRN, live Cosmo/ERP APIs.
+
+Stage 6A1 allocation entry: `/staff/requests/[id]` → **Allocate order** (requires `ALLOCATE_ORDER` plus submitted availability with an active reserve). See [orders-allocation.md](orders-allocation.md).
 
 ## Permissions
 
@@ -36,10 +38,35 @@ Distribution modes: `ALL_MATCHING` or `SELECTED` (subset of eligible).
 | Path | Purpose |
 | --- | --- |
 | `/staff/requirements/[id]/distribute` | Preview matching suppliers and send |
+| `/staff/osf-imports/[importId]/distribute` | Phase F1 guided multi-brand availability distribution |
 | `/staff/requests` | Company list of sent requests |
 | `/staff/requests/[id]` | Read-only availability review |
 | `/supplier/requests` | Supplier inbox |
 | `/supplier/requests/[id]` | Draft/submit availability |
+
+## Phase F1 — OSF guided distribution
+
+- One wizard for all **CONFIRMED** brand requirements on a confirmed OSF import.
+- Reuses `filterMatchingSuppliers` and `distributeRequirementInTransaction` (same quantity / request semantics as manual distribute).
+- Default request qty = `RequirementItem.quantityPlanned`; optional overrides require acknowledgment when over planned. Requirement quantities are never modified.
+- Durable per-brand ledger: `OsfImportDistribution` (`IN_PROGRESS` / `SUCCEEDED` / `SKIPPED_ALREADY_REQUESTED` / `FAILED`).
+- **Lock order (per brand txn):** `Requirement FOR UPDATE` → claim/reclaim ledger → create `SupplierRequest` + items + DB notifications + audit → complete ledger. Brands run in separate transactions.
+- Idempotency key resolved outside interactive txns; pending key acquired before the brand loop; completed after aggregation. Same-key replay returns stored outcomes; changed payload → conflict.
+- `SKIPPED_ALREADY_REQUESTED` is not a successful send. Retry failed brands only via `retryFailedOnly`. Future additional requests after success/skip need a separate explicit workflow (not F1).
+- Does **not** create or modify Purchase Orders.
+
+### Lock order and deadlock avoidance
+
+1. Always lock `Requirement` first (`SELECT … FOR UPDATE`), then touch `OsfImportDistribution` for that same requirement.
+2. Never lock two requirements in one transaction (per-brand txns), so multi-brand distributes cannot deadlock across brands.
+3. SupplierRequest uniqueness + active-status skip inside the same txn prevents duplicate sends under concurrent different keys once a brand ledger reaches `SUCCEEDED`.
+4. Unexpired foreign `IN_PROGRESS` claims raise `VERSION_CONFLICT` without overwriting; expired claims are reclaimable.
+
+### Quantity extension point (F2 / Cosmo suggestions)
+
+F1 builds a single `Map<requirementItemId, Decimal>` via `buildQuantityByItemId` and applies it to **every** recipient in `distributeRequirementInTransaction`.
+
+Future per-supplier / per-item suggestions should replace that map with a nested structure (e.g. `Map<supplierId, Map<requirementItemId, Decimal>>`) at the call site into `distributeRequirementInTransaction` — without changing `RequirementItem.quantityPlanned` or inventing a parallel create path.
 
 ## Availability rules
 

@@ -1,0 +1,27 @@
+---
+description: Next.js/React/TypeScript engineering judgment — clarity, security, operations
+alwaysApply: true
+---
+
+# Next.js / React engineering
+
+Expert in TypeScript, React, Next.js, Tailwind, and Node.js. Prefer simple solutions; avoid unnecessary duplication.
+
+## Working style
+
+- Break work into discrete changes; suggest a small verification step after each stage when helpful.
+- Prefer conceptual explanations for architecture; use code when illustrating complex logic or when asked.
+- Ask when requirements are ambiguous; discuss trade-offs when choices matter.
+- Match existing names and string literals unless a change is required.
+- For Next.js APIs and file conventions, follow root `AGENTS.md` and `node_modules/next/dist/docs/` (do not edit `AGENTS.md`).
+
+## Security and correctness
+
+- Never trust client-supplied tenant or permission claims; enforce authz in application code.
+- For auth, input handling, or other security-sensitive changes, reason carefully before shipping (call out risks briefly when relevant).
+- Prefer robust error handling and edge-case coverage without over-engineering.
+
+## Operations
+
+- Consider how changes are hosted, monitored, and maintained when relevant.
+- Do not casually change build/runtime config to paper over known issues (see `feature-dev-qa` Cosmo/`cacheComponents` note).

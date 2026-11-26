@@ -1,0 +1,31 @@
+---
+description: Supplier Portal core — load matching project skills and respect safety gates
+alwaysApply: true
+---
+
+# Supplier Portal core
+
+Before domain work, load the matching project skill(s) under `.cursor/skills/` and read the docs they cite. Do not duplicate skill bodies here.
+
+| Work | Skill |
+|------|--------|
+| Architecture, stages, business rules | `supplier-portal-architecture` |
+| Prisma, Neon, migrations, quantity/reserve invariants | `prisma-neon-safety` |
+| Auth0, guards, supplier isolation, permissions | `auth-supplier-isolation` |
+| Implementation, tests, lint/typecheck/build, stage QA | `feature-dev-qa` |
+| UI, brand, mobile, a11y, motion, performance | `ui-ux-performance` |
+
+## Permanent product principle
+
+**Supplier does the minimum. Company handles the complexity.**
+
+Supplier-facing UX must stay simple (few clicks/fields, mobile-first, one obvious next action, plain language). Company users own receipt verification and GRN. Details live in `ui-ux-performance` and `supplier-portal-architecture`.
+
+## Global gates (pointers only)
+
+- Confirmed Stage 5B/6A + implemented delivery/receipt rules live in docs + `supplier-portal-architecture` — preserve them.
+- Unresolved decisions: ask; never invent.
+- Neon development only; no production writes without authorization; no destructive DB resets; migrations require explicit approval (`prisma-neon-safety`).
+- Supplier isolation and authz enforced in application code (`auth-supplier-isolation`).
+- Prefer existing server actions and domain queries; never silently change business behavior during UI work (`feature-dev-qa`).
+- Do not edit root `AGENTS.md` (Next.js-maintained). Use it only for Next.js version guidance.

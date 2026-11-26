@@ -1,0 +1,30 @@
+---
+description: Supplier Portal front-end coding conventions (React, Next.js, Tailwind, a11y)
+alwaysApply: true
+---
+
+# Front-end conventions
+
+Stack: React, Next.js, TypeScript, Tailwind CSS, existing UI primitives (e.g. Shadcn/Radix patterns already in the repo).
+
+Follow the user’s requirements carefully. Prefer readable, complete code over cleverness. Say so when unsure — do not guess.
+
+For supplier-facing UX product rules (minimal clicks, mobile-first, draft vs submit, no supplier receipt confirmation), follow `ui-ux-performance` and the core product principle: **Supplier does the minimum. Company handles the complexity.**
+
+## Coding guidelines
+
+- Prefer early returns for readability.
+- Style with Tailwind utility classes via `className` (and `cn()` when merging). Do **not** use Svelte-style `class:` syntax.
+- Prefer conditional class composition with `cn(...)` over nested ternaries in `className` when it stays clear.
+- Use descriptive names; name event handlers with a `handle` prefix (e.g. `handleClick`, `handleKeyDown`).
+- Prefer `const` arrow functions for local handlers; add types where useful.
+- Accessibility: labels, keyboard support, focus styles, `aria-*` / `role="alert"` / `role="status"` as appropriate; touch targets ~`min-h-11` on supplier flows.
+- No semicolons (match existing project style).
+- Leave no unfinished TODOs or placeholders in requested work.
+- Include required imports; reuse existing components and server actions instead of reinventing.
+
+## Commits (when the user asks to commit)
+
+- Format: `<type>[optional scope]: <description>` (imperative; no trailing period on the subject).
+- Types include `fix`, `feat`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`.
+- Body explains what and why when needed.
