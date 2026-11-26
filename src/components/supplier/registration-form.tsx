@@ -6,6 +6,8 @@ import type { RegisterActionResult } from "@/app/register/supplier/actions";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+import { SelectListedBrands } from "./select-listed-brands";
+
 type BrandOption = { id: string; name: string };
 
 const fieldClass =
@@ -87,9 +89,9 @@ export function SupplierRegistrationForm({
             className="mt-1 size-4"
           />
           <span>
-            All brands
+            Receive requests for all brands
             <span className="mt-0.5 block text-muted-foreground">
-              Select this if you can supply every brand in the catalog.
+              Your catalogue shows the brands selected below.
             </span>
           </span>
         </label>
@@ -100,6 +102,8 @@ export function SupplierRegistrationForm({
             later after approval.
           </p>
         ) : (
+          <div className="space-y-2">
+          <SelectListedBrands />
           <ul className="grid gap-2 sm:grid-cols-2">
             {brands.map((brand) => (
               <li key={brand.id}>
@@ -115,6 +119,7 @@ export function SupplierRegistrationForm({
               </li>
             ))}
           </ul>
+          </div>
         )}
       </fieldset>
 

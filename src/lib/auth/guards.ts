@@ -9,6 +9,7 @@ import {
   assertAuthenticatedUser,
   assertCanManageStaffPermissions,
   assertStaffPermission,
+  assertStaffPermissions,
   assertSupplierAccountActive,
   assertSupplierOwnership,
   assertSupplierUser,
@@ -74,6 +75,51 @@ export async function requireStaffPermission(
   const granted = await loadStaffPermissionCodes(user.id);
   assertStaffPermission(user, granted, permission, options);
   return user;
+}
+
+/**
+ * STAFF must hold every listed permission (AND). ADMIN bypasses by default.
+ * Load grants once; fail closed before any mutation work.
+ */
+export async function requireStaffPermissions(
+  permissions: readonly StaffPermissionCode[],
+  options: { adminBypass?: boolean } = {},
+): Promise<ProvisionedAppUser> {
+  const user = await requireAuthenticatedUser();
+  const granted = await loadStaffPermissionCodes(user.id);
+  assertStaffPermissions(user, granted, permissions, options);
+  return user;
+}
+
+/**
+ * Soft permission probe for UI affordances. Does not replace
+ * requireStaffPermission on mutations.
+ */
+export async function canStaffPermission(
+  permission: StaffPermissionCode,
+  options: { adminBypass?: boolean } = {},
+): Promise<boolean> {
+  try {
+    await requireStaffPermission(permission, options);
+    return true;
+  } catch (error) {
+    if (isAuthorizationError(error)) return false;
+    throw error;
+  }
+}
+
+/** Soft AND probe for multi-permission mutations (e.g. verify + issue GRN). */
+export async function canStaffPermissions(
+  permissions: readonly StaffPermissionCode[],
+  options: { adminBypass?: boolean } = {},
+): Promise<boolean> {
+  try {
+    await requireStaffPermissions(permissions, options);
+    return true;
+  } catch (error) {
+    if (isAuthorizationError(error)) return false;
+    throw error;
+  }
 }
 
 /**

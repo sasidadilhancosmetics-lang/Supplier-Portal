@@ -49,6 +49,24 @@ export function assertStaffPermission(
   }
 }
 
+/**
+ * Require every listed staff permission (AND). ADMIN bypasses all when enabled.
+ * Used when one mutation performs multiple authorized steps (e.g. verify + GRN).
+ */
+export function assertStaffPermissions(
+  user: ProvisionedAppUser,
+  granted: ReadonlySet<StaffPermissionCode>,
+  permissions: readonly StaffPermissionCode[],
+  options: { adminBypass?: boolean } = {},
+): void {
+  if (permissions.length === 0) {
+    throw new AuthorizationError("FORBIDDEN");
+  }
+  for (const permission of permissions) {
+    assertStaffPermission(user, granted, permission, options);
+  }
+}
+
 export function assertSupplierUser(user: ProvisionedAppUser): void {
   assertAuthenticatedUser(user);
 

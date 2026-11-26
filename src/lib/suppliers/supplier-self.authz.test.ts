@@ -13,7 +13,11 @@ vi.mock("@/lib/db", () => ({
     supplierRequest: { findMany: vi.fn() },
     supplierBrand: { deleteMany: vi.fn(), createMany: vi.fn() },
     auditLog: { create: vi.fn() },
-    $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
+    $transaction: vi.fn(async (operation: (tx: unknown) => Promise<unknown>) => {
+      const { prisma } = await import("@/lib/db");
+      return operation(prisma);
+    }),
   },
 }));
 
@@ -65,6 +69,7 @@ describe("supplier self-service authorization", () => {
     });
 
     const { prisma } = await import("@/lib/db");
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([{ id: "sup_owned" }]);
     vi.mocked(prisma.supplier.findFirst).mockResolvedValue(null);
 
     await expect(

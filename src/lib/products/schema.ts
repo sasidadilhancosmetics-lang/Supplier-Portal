@@ -10,15 +10,6 @@ const optionalText = z
 export const productPrioritySchema = z.enum(["NORMAL", "HIGH", "CRITICAL"]);
 export const productMasterStatusSchema = z.enum(["PROVISIONAL", "ERP_LINKED"]);
 
-export const createProvisionalProductSchema = z.object({
-  name: z.string().trim().min(1, "Product name is required").max(200),
-  brandId: z.string().min(1, "Brand is required"),
-  sku: optionalText,
-  unitOfMeasure: optionalText,
-  priorityStatus: productPrioritySchema.default("NORMAL"),
-  isActive: z.boolean().default(true),
-});
-
 export const updateProductSchema = z.object({
   productId: z.string().min(1),
   name: z.string().trim().min(1, "Product name is required").max(200),
@@ -57,7 +48,4 @@ export const productListQuerySchema = z.object({
   }, z.coerce.number().int().min(1).default(1)),
 });
 
-export type CreateProvisionalProductInput = z.infer<
-  typeof createProvisionalProductSchema
->;
 export type UpdateProductInput = z.infer<typeof updateProductSchema>;

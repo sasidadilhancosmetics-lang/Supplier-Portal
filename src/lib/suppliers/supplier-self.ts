@@ -12,6 +12,7 @@ import {
 } from "./brand-rules";
 import { ACTIVE_SUPPLIER_REQUEST_STATUSES } from "./constants";
 import { SupplierDomainError } from "./errors";
+import { lockSuppliers } from "./locking";
 import { supplierProfileSchema } from "./schema";
 
 /**
@@ -31,68 +32,70 @@ export async function updateOwnSupplierProfile(raw: unknown) {
   }
   const input = parsed.data;
 
-  const existing = await prisma.supplier.findFirst({
-    where: { id: supplierId, companyId: user.companyId },
-    include: { brands: { select: { brandId: true } } },
-  });
-  if (!existing) {
-    throw new SupplierDomainError("NOT_FOUND", "Supplier not found.");
-  }
-
-  const brandIds = [...new Set(input.brandIds)];
-  if (brandIds.length > 0) {
-    const count = await prisma.brand.count({
-      where: { companyId: user.companyId, id: { in: brandIds } },
+  await prisma.$transaction(async (tx) => {
+    await lockSuppliers(tx, user.companyId, [supplierId]);
+    const existing = await tx.supplier.findFirst({
+      where: { id: supplierId, companyId: user.companyId },
+      include: { brands: { select: { brandId: true } } },
     });
-    if (count !== brandIds.length) {
-      throw new SupplierDomainError(
-        "INVALID_BRAND",
-        "One or more selected brands are invalid.",
-      );
+    if (!existing || existing.status !== "ACTIVE") {
+      throw new SupplierDomainError("NOT_FOUND", "Supplier not found.");
     }
-  }
 
-  const currentBrandIds = existing.brands.map((b) => b.brandId);
-  const activeRequestBrandIds = (
-    await prisma.supplierRequest.findMany({
-      where: {
-        supplierId,
-        status: { in: [...ACTIVE_SUPPLIER_REQUEST_STATUSES] },
-      },
-      select: { brandId: true },
-      distinct: ["brandId"],
-    })
-  ).map((row) => row.brandId);
+    const brandIds = [...new Set(input.brandIds)];
+    if (brandIds.length > 0) {
+      const count = await tx.brand.count({
+        where: { companyId: user.companyId, id: { in: brandIds } },
+      });
+      if (count !== brandIds.length) {
+        throw new SupplierDomainError(
+          "INVALID_BRAND",
+          "One or more selected brands are invalid.",
+        );
+      }
+    }
 
-  const blocked = blockedBrandRemovals({
-    currentBrandIds,
-    nextBrandIds: brandIds,
-    activeRequestBrandIds,
-  });
-  if (blocked.length > 0) {
-    throw new SupplierDomainError(
-      "BRAND_LOCKED",
-      "Cannot remove a brand that has an active supplier request.",
-    );
-  }
+    const currentBrandIds = existing.brands.map((b) => b.brandId);
+    const activeRequestBrandIds = (
+      await tx.supplierRequest.findMany({
+        where: {
+          companyId: user.companyId,
+          supplierId,
+          status: { in: [...ACTIVE_SUPPLIER_REQUEST_STATUSES] },
+        },
+        select: { brandId: true },
+        distinct: ["brandId"],
+      })
+    ).map((row) => row.brandId);
 
-  if (
-    !canDisableSupportsAllBrands({
-      currentlySupportsAll: existing.supportsAllBrands,
-      nextSupportsAll: input.supportsAllBrands,
+    const blocked = blockedBrandRemovals({
+      currentBrandIds,
       nextBrandIds: brandIds,
       activeRequestBrandIds,
-    })
-  ) {
-    throw new SupplierDomainError(
-      "ALL_BRANDS_LOCKED",
-      "Cannot turn off All Brands while active requests exist for brands not still selected.",
-    );
-  }
+    });
+    if (blocked.length > 0) {
+      throw new SupplierDomainError(
+        "BRAND_LOCKED",
+        "Cannot remove a brand that has an active supplier request.",
+      );
+    }
 
-  const nullable = (value: string | undefined) => value ?? null;
+    if (
+      !canDisableSupportsAllBrands({
+        currentlySupportsAll: existing.supportsAllBrands,
+        nextSupportsAll: input.supportsAllBrands,
+        nextBrandIds: brandIds,
+        activeRequestBrandIds,
+      })
+    ) {
+      throw new SupplierDomainError(
+        "ALL_BRANDS_LOCKED",
+        "Cannot turn off All Brands while active requests exist for brands not still selected.",
+      );
+    }
 
-  await prisma.$transaction(async (tx) => {
+    const nullable = (value: string | undefined) => value ?? null;
+
     const before = {
       name: existing.name,
       supportsAllBrands: existing.supportsAllBrands,

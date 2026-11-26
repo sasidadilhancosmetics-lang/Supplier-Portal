@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { REQUEST_PAGE_SIZE } from "./constants";
 import { RequestDomainError } from "./errors";
 import { expireOfferIfNeeded } from "./availability";
+import { readAvailabilitySplits } from "./availability-splits";
 import { supplierRequestListQuerySchema } from "./schema";
 
 /** Company review of sent supplier requests and availability. */
@@ -91,7 +92,9 @@ export async function getCompanySupplierRequest(supplierRequestId: string) {
               unitOfMeasure: true,
             },
           },
-          availabilityOffer: true,
+          availabilityOffer: {
+            include: { priceAgreement: true },
+          },
         },
         orderBy: { createdAt: "asc" },
       },
@@ -105,9 +108,24 @@ export async function getCompanySupplierRequest(supplierRequestId: string) {
   const now = new Date();
   const lines = [];
   for (const item of request.items) {
+    const agreement = item.availabilityOffer?.priceAgreement ?? null;
     let offer = item.availabilityOffer;
     if (offer) {
-      offer = await expireOfferIfNeeded(offer.id, offer.supplierId);
+      const expired = await expireOfferIfNeeded(offer.id, offer.supplierId);
+      offer = expired
+        ? {
+            ...offer,
+            status: expired.status,
+            version: expired.version,
+            reservedAt: expired.reservedAt,
+            reserveExpiresAt: expired.reserveExpiresAt,
+            quantityDeclared: expired.quantityDeclared,
+            quantityOrderedActive: expired.quantityOrderedActive,
+            unitPrice: expired.unitPrice,
+            availableDate: expired.availableDate,
+            notes: expired.notes,
+          }
+        : offer;
     }
 
     const required = Number(item.quantityRequested);
@@ -137,13 +155,23 @@ export async function getCompanySupplierRequest(supplierRequestId: string) {
       product: item.product,
       offer: offer
         ? {
+            id: offer.id,
             status: offer.status,
             quantityDeclared: offer.quantityDeclared.toString(),
             quantityOrderedActive: offer.quantityOrderedActive.toString(),
+            unitPrice: offer.unitPrice?.toString() ?? null,
             availableDate: offer.availableDate,
+            splits: readAvailabilitySplits(offer.availableSplits),
             reservedAt: offer.reservedAt,
             reserveExpiresAt: offer.reserveExpiresAt,
             notes: offer.notes,
+            priceAgreement: agreement
+              ? {
+                  status: agreement.status,
+                  unitPrice: agreement.unitPrice.toString(),
+                  version: agreement.version,
+                }
+              : null,
           }
         : null,
       remainingAllocatable: remainingAllocatable.toString(),

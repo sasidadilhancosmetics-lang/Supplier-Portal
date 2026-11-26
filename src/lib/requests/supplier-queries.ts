@@ -17,11 +17,30 @@ export async function listSupplierRequestsForSupplier(rawQuery: {
     throw new RequestDomainError("VALIDATION", "Invalid filters.");
   }
 
-  const where = {
-    companyId: user.companyId,
-    supplierId: user.supplierId!,
-    ...(parsed.data.status ? { status: parsed.data.status as never } : {}),
-  };
+  const companyId = user.companyId;
+  const supplierId = user.supplierId!;
+  const statusFilter = parsed.data.status;
+  const listAll = !statusFilter || statusFilter === "ALL";
+
+  const actionRequiredIds =
+    statusFilter === "ACTION_REQUIRED"
+      ? await loadActionRequiredRequestIds(companyId, supplierId)
+      : null;
+
+  const where =
+    statusFilter === "ACTION_REQUIRED"
+      ? {
+          companyId,
+          supplierId,
+          id: { in: actionRequiredIds!.length ? actionRequiredIds! : ["__none__"] },
+        }
+      : {
+          companyId,
+          supplierId,
+          ...(!listAll && statusFilter
+            ? { status: statusFilter as never }
+            : {}),
+        };
 
   const [total, rows] = await prisma.$transaction([
     prisma.supplierRequest.count({ where }),
@@ -33,24 +52,78 @@ export async function listSupplierRequestsForSupplier(rawQuery: {
       include: {
         brand: { select: { id: true, name: true } },
         _count: { select: { items: true } },
+        items: {
+          select: {
+            availabilityOffer: {
+              select: {
+                priceAgreement: { select: { status: true } },
+              },
+            },
+          },
+        },
       },
     }),
   ]);
 
   return {
-    items: rows.map((row) => ({
-      id: row.id,
-      status: row.status,
-      brand: row.brand,
-      itemCount: row._count.items,
-      responseDeadline: row.responseDeadline,
-      sentAt: row.sentAt,
-      respondedAt: row.respondedAt,
-    })),
+    items: rows.map((row) => {
+      const hasCounter = row.items.some(
+        (item) =>
+          item.availabilityOffer?.priceAgreement?.status === "COUNTER_PENDING",
+      );
+      return {
+        id: row.id,
+        status: row.status,
+        brand: row.brand,
+        itemCount: row._count.items,
+        responseDeadline: row.responseDeadline,
+        sentAt: row.sentAt,
+        respondedAt: row.respondedAt,
+        actionRequired: hasCounter || row.status === "NEW" || row.status === "PARTIALLY_RESPONDED",
+        hasPendingCounter: hasCounter,
+      };
+    }),
     total,
     page: parsed.data.page,
     pageSize: REQUEST_PAGE_SIZE,
     pageCount: Math.max(1, Math.ceil(total / REQUEST_PAGE_SIZE)),
     status: parsed.data.status ?? null,
   };
+}
+
+async function loadActionRequiredRequestIds(
+  companyId: string,
+  supplierId: string,
+) {
+  const [open, counters] = await Promise.all([
+    prisma.supplierRequest.findMany({
+      where: {
+        companyId,
+        supplierId,
+        status: { in: ["NEW", "PARTIALLY_RESPONDED"] },
+      },
+      select: { id: true },
+    }),
+    prisma.priceAgreement.findMany({
+      where: {
+        companyId,
+        supplierId,
+        status: "COUNTER_PENDING",
+      },
+      select: {
+        availabilityOffer: {
+          select: {
+            requestItem: { select: { supplierRequestId: true } },
+          },
+        },
+      },
+    }),
+  ]);
+
+  const ids = new Set<string>();
+  for (const row of open) ids.add(row.id);
+  for (const row of counters) {
+    ids.add(row.availabilityOffer.requestItem.supplierRequestId);
+  }
+  return [...ids];
 }

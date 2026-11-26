@@ -75,7 +75,15 @@ describe("availability authorization", () => {
     await expect(
       submitAvailability({
         supplierRequestId: "sr_1",
-        lines: [{ requestItemId: "ri_1", quantityDeclared: 1, notAvailable: false }],
+        lines: [
+          {
+            requestItemId: "ri_1",
+            quantityDeclared: 1,
+            unitPrice: 100,
+            availableDate: "2026-12-01",
+            notAvailable: false,
+          },
+        ],
       }),
     ).rejects.toBeInstanceOf(AuthorizationError);
   });

@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   formatCalendarDate,
   formatDateTime,
+  formatShortDateTime,
+  isFuturePortalCalendarDate,
   parseCalendarDateInput,
   toCalendarDateInputValue,
+  todayCalendarDateInPortalTz,
 } from "./dates";
 
 describe("calendar date helpers", () => {
@@ -32,11 +35,48 @@ describe("calendar date helpers", () => {
     expect(formatCalendarDate(stored)).toBe("Nov 14, 2026");
   });
 
-  it("keeps event timestamps as date+time display", () => {
-    const instant = new Date("2026-11-14T00:00:00.000Z");
-    const formatted = formatDateTime(instant);
-    expect(formatted).not.toBe("—");
-    // Must include a time component (locale-dependent separator).
-    expect(/[0-9].*[AP]M|[0-9]{1,2}:[0-9]{2}/i.test(formatted)).toBe(true);
+  it("formats event timestamps in Asia/Colombo without mutating UTC storage", () => {
+    // 05:00 UTC → 10:30 AM Sri Lanka
+    const instant = new Date("2026-11-16T05:00:00.000Z");
+    expect(instant.toISOString()).toBe("2026-11-16T05:00:00.000Z");
+    expect(formatDateTime(instant)).toBe("Nov 16, 2026, 10:30 AM");
+  });
+
+  it("formats another UTC morning instant to Colombo afternoon", () => {
+    const instant = new Date("2026-11-16T04:57:00.000Z");
+    expect(formatDateTime(instant)).toBe("Nov 16, 2026, 10:27 AM");
+  });
+
+  it("formats short event timestamps without year in the same calendar year", () => {
+    const instant = new Date("2026-11-23T04:36:00.000Z");
+    const now = new Date("2026-11-18T05:00:00.000Z");
+    expect(formatShortDateTime(instant, "—", now)).toBe("Nov 23, 10:06 AM");
+    expect(formatDateTime(instant)).toBe("Nov 23, 2026, 10:06 AM");
+  });
+
+  it("keeps the year on short timestamps when it differs", () => {
+    const instant = new Date("2027-01-05T04:36:00.000Z");
+    const now = new Date("2026-11-18T05:00:00.000Z");
+    expect(formatShortDateTime(instant, "—", now)).toBe(
+      "Jan 5, 2027, 10:06 AM",
+    );
+  });
+
+  it("resolves portal calendar today and future checks in Asia/Colombo", () => {
+    const beforeMidnightColombo = new Date("2026-11-16T18:29:00.000Z");
+    expect(todayCalendarDateInPortalTz(beforeMidnightColombo)).toBe(
+      "2026-11-16",
+    );
+    const afterMidnightColombo = new Date("2026-11-16T18:30:00.000Z");
+    expect(todayCalendarDateInPortalTz(afterMidnightColombo)).toBe(
+      "2026-11-17",
+    );
+    expect(
+      isFuturePortalCalendarDate("2026-11-17", beforeMidnightColombo),
+    ).toBe(true);
+    expect(
+      isFuturePortalCalendarDate("2026-11-16", beforeMidnightColombo),
+    ).toBe(false);
   });
 });
+

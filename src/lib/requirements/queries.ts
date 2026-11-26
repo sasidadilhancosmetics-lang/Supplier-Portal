@@ -6,25 +6,10 @@ import { Prisma } from "@/generated/prisma/client";
 import { requireStaffPermission } from "@/lib/auth/guards";
 import { prisma } from "@/lib/db";
 
+import { requireRequirementReadAccess } from "./access";
 import { REQUIREMENT_PAGE_SIZE } from "./constants";
 import { RequirementDomainError } from "./errors";
 import { requirementListQuerySchema } from "./schema";
-
-/**
- * List/view requirements: MANAGE_REQUIREMENTS or CONFIRM_REQUIREMENT (or ADMIN).
- * View is shared so confirmers can open confirmed requirements to distribute.
- */
-async function requireRequirementReadAccess() {
-  try {
-    return await requireStaffPermission("MANAGE_REQUIREMENTS");
-  } catch {
-    try {
-      return await requireStaffPermission("CONFIRM_REQUIREMENT");
-    } catch {
-      return requireStaffPermission("SEND_SUPPLIER_REQUEST");
-    }
-  }
-}
 
 export async function listRequirements(rawQuery: {
   q?: string;
@@ -33,6 +18,19 @@ export async function listRequirements(rawQuery: {
   page?: string | number;
 }) {
   const user = await requireRequirementReadAccess();
+  return listRequirementsForUser(user.companyId, rawQuery);
+}
+
+/** Company-scoped list after auth (shared by page loader). */
+export async function listRequirementsForUser(
+  companyId: string,
+  rawQuery: {
+    q?: string;
+    status?: string;
+    brandId?: string;
+    page?: string | number;
+  },
+) {
   const parsed = requirementListQuerySchema.safeParse(rawQuery);
   if (!parsed.success) {
     throw new RequirementDomainError("VALIDATION", "Invalid list filters.");
@@ -40,7 +38,7 @@ export async function listRequirements(rawQuery: {
 
   const { q, status, brandId, page } = parsed.data;
   const where: Prisma.RequirementWhereInput = {
-    companyId: user.companyId,
+    companyId,
   };
   if (status) where.status = status;
   if (brandId) where.brandId = brandId;
@@ -84,6 +82,29 @@ export async function listRequirements(rawQuery: {
     status: status ?? null,
     brandId: brandId ?? null,
   };
+}
+
+/**
+ * Requirements index: one auth check, then list + brand filter options.
+ * Avoids Promise.all of two separately gated loaders (permission mismatch
+ * previously turned CONFIRM/SEND readers into a blank error page).
+ */
+export async function loadRequirementsIndexPage(rawQuery: {
+  q?: string;
+  status?: string;
+  brandId?: string;
+  page?: string | number;
+}) {
+  const user = await requireRequirementReadAccess();
+  const [result, brands] = await Promise.all([
+    listRequirementsForUser(user.companyId, rawQuery),
+    prisma.brand.findMany({
+      where: { companyId: user.companyId },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
+  return { result, brands };
 }
 
 export async function getRequirement(requirementId: string) {

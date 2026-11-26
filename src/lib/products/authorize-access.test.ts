@@ -20,23 +20,13 @@ vi.mock("@/lib/db", () => ({
 
 import { AuthorizationError } from "@/lib/auth/errors";
 import { requireStaffPermission } from "@/lib/auth/guards";
-import { createProvisionalProduct, updateProduct } from "./mutations";
+import { updateProduct } from "./mutations";
 
 const requirePerm = vi.mocked(requireStaffPermission);
 
 describe("product mutation authorization", () => {
   beforeEach(() => {
     requirePerm.mockReset();
-  });
-
-  it("rejects create without MANAGE_PRODUCTS", async () => {
-    requirePerm.mockRejectedValueOnce(new AuthorizationError("FORBIDDEN"));
-    await expect(
-      createProvisionalProduct({
-        name: "Serum",
-        brandId: "b1",
-      }),
-    ).rejects.toBeInstanceOf(AuthorizationError);
   });
 
   it("rejects update without MANAGE_PRODUCTS", async () => {

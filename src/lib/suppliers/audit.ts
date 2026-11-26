@@ -7,7 +7,12 @@ import { prisma } from "@/lib/db";
 type AuditInput = {
   actorUserId: string;
   entityId: string;
-  action: "CREATE" | "UPDATE" | "STATUS_CHANGE" | "BRANDS_CHANGE";
+  action:
+    | "CREATE"
+    | "UPDATE"
+    | "STATUS_CHANGE"
+    | "BRANDS_CHANGE"
+    | "EXTERNAL_ID_CHANGE";
   beforeJson?: Prisma.InputJsonValue;
   afterJson?: Prisma.InputJsonValue;
   tx?: Prisma.TransactionClient;

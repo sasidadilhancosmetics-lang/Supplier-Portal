@@ -4,9 +4,9 @@ import { Suspense } from "react";
 
 import { RequirementStatusBadge } from "@/components/staff/requirement-status-badge";
 import { buttonVariants } from "@/components/ui/button";
-import { listBrandsForRequirements } from "@/lib/brands/queries";
+import { isAuthorizationError } from "@/lib/auth/errors";
 import { isRequirementDomainError } from "@/lib/requirements/errors";
-import { listRequirements } from "@/lib/requirements/queries";
+import { loadRequirementsIndexPage } from "@/lib/requirements/queries";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -36,19 +36,23 @@ async function RequirementList({
   searchParams: PageProps["searchParams"];
 }) {
   const params = await searchParams;
-  let result: Awaited<ReturnType<typeof listRequirements>> | null = null;
+  let result: Awaited<
+    ReturnType<typeof loadRequirementsIndexPage>
+  >["result"] | null = null;
   let brands: { id: string; name: string }[] = [];
   let errorMessage: string | null = null;
 
   try {
-    [result, brands] = await Promise.all([
-      listRequirements(params),
-      listBrandsForRequirements(),
-    ]);
+    ({ result, brands } = await loadRequirementsIndexPage(params));
   } catch (error) {
-    errorMessage = isRequirementDomainError(error)
-      ? error.message
-      : "Unable to load requirements.";
+    if (isRequirementDomainError(error)) {
+      errorMessage = error.message;
+    } else if (isAuthorizationError(error)) {
+      errorMessage = "You do not have permission to view requirements.";
+    } else {
+      console.error("[staff/requirements] load failed", error);
+      errorMessage = "Unable to load requirements.";
+    }
   }
 
   if (errorMessage || !result) {
@@ -224,8 +228,8 @@ export default function RequirementsPage({ searchParams }: PageProps) {
             Requirements
           </h1>
           <p className="text-base leading-7 text-muted-foreground">
-            Create draft requirements for development testing, review items, and
-            confirm. Supplier request distribution comes later.
+            Create draft requirements, confirm them, then distribute supplier
+            requests and allocate purchase orders from responses.
           </p>
         </div>
         <Link

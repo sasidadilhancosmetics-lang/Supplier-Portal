@@ -60,6 +60,53 @@ export const supplierStatusChangeSchema = z.object({
   status: supplierOperationalStatusSchema,
 });
 
+/**
+ * Cosmo OS Supplier.id → Portal Supplier.externalId (F2B).
+ * Empty / blank clears the mapping. Trim only — never case-fold.
+ */
+export const cosmoExternalIdSchema = z
+  .string()
+  .trim()
+  .max(200)
+  .transform((value) => (value.length > 0 ? value : null));
+
+function nullableExternalIdInput(value: unknown): string | null {
+  if (value == null) return null;
+  const trimmed = String(value).trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export const updateSupplierExternalIdSchema = z.object({
+  supplierId: z.string().min(1),
+  /** New Cosmo Supplier.id, or empty to clear. */
+  externalId: cosmoExternalIdSchema,
+  /**
+   * Required when replacing or clearing an existing non-null mapping.
+   * Setting a first mapping (null → value) does not require confirmation.
+   */
+  confirmChange: z.boolean().default(false),
+  /**
+   * Optimistic concurrency: must match the supplier's current externalId
+   * (null if currently unmapped). Prevents silent overwrites.
+   */
+  expectedExternalId: z.preprocess(
+    nullableExternalIdInput,
+    z.string().max(200).nullable(),
+  ),
+});
+
+/** Map an unresolved Cosmo suggestion identity onto an existing Portal supplier. */
+export const mapUnresolvedCosmoSupplierSchema = z.object({
+  importId: z.string().min(1),
+  cosmoSupplierId: z.string().trim().min(1).max(200),
+  portalSupplierId: z.string().min(1),
+  confirmChange: z.boolean().default(false),
+  expectedPortalExternalId: z.preprocess(
+    nullableExternalIdInput,
+    z.string().max(200).nullable(),
+  ),
+});
+
 /** Self-registration form — contact name required; address/notes optional. */
 export const supplierSelfRegistrationSchema = z.object({
   name: z.string().trim().min(1, "Company name is required").max(200),

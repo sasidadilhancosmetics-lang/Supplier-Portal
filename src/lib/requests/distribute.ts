@@ -1,26 +1,22 @@
 import "server-only";
 
-import { Prisma } from "@/generated/prisma/client";
-
 import { requireStaffPermission } from "@/lib/auth/guards";
-import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/db";
-import { createId } from "@/lib/id";
-import { createUserNotification } from "@/lib/notifications";
 
+import {
+  ACTIVE_REQUEST_STATUSES,
+  buildQuantityByItemId,
+  distributeRequirementInTransaction,
+  recipientsFromPlanned,
+  type DistributePreview,
+} from "./distribute-core";
 import { RequestDomainError } from "./errors";
 import { filterMatchingSuppliers, type MatchableSupplier } from "./matching";
 import { distributeRequirementSchema } from "./schema";
 
-const ACTIVE_REQUEST_STATUSES = [
-  "NEW",
-  "PARTIALLY_RESPONDED",
-  "RESPONDED",
-] as const;
-
 export async function listMatchingSuppliersForRequirement(
   requirementId: string,
-) {
+): Promise<DistributePreview> {
   const user = await requireStaffPermission("SEND_SUPPLIER_REQUEST");
   const requirement = await prisma.requirement.findFirst({
     where: { id: requirementId, companyId: user.companyId },
@@ -164,106 +160,37 @@ export async function distributeRequirement(raw: unknown) {
     );
   }
 
-  if (preview.requirement.items.length === 0) {
-    throw new RequestDomainError(
-      "EMPTY_ITEMS",
-      "Requirement has no line items.",
-    );
-  }
+  const quantityByItemId = buildQuantityByItemId(
+    preview.requirement.items,
+    parsed.data.quantityOverrides,
+    parsed.data.acknowledgeOverQty,
+  );
+  const explicitRecipients = recipientsFromPlanned({
+    recipients,
+    items: preview.requirement.items,
+    quantityByItemId,
+  });
 
   const deadline = parsed.data.responseDeadline
     ? new Date(parsed.data.responseDeadline)
     : null;
-  const now = new Date();
 
-  const createdIds = await prisma.$transaction(async (tx) => {
-    const ids: string[] = [];
+  const result = await prisma.$transaction(async (tx) =>
+    distributeRequirementInTransaction(tx, {
+      actor: user,
+      requirementId: parsed.data.requirementId,
+      brandId: preview.requirement.brand.id,
+      brandName: preview.requirement.brand.name,
+      mode: parsed.data.mode,
+      items: preview.requirement.items,
+      recipients: explicitRecipients,
+      responseDeadline: deadline,
+    }),
+  );
 
-    for (const supplier of recipients) {
-      // Re-check inside tx to reduce duplicate races.
-      const existing = await tx.supplierRequest.findFirst({
-        where: {
-          companyId: user.companyId,
-          requirementId: parsed.data.requirementId,
-          supplierId: supplier.id,
-          status: { in: [...ACTIVE_REQUEST_STATUSES] },
-        },
-        select: { id: true },
-      });
-      if (existing) {
-        continue;
-      }
-
-      const requestId = createId();
-      await tx.supplierRequest.create({
-        data: {
-          id: requestId,
-          companyId: user.companyId,
-          requirementId: parsed.data.requirementId,
-          supplierId: supplier.id,
-          brandId: preview.requirement.brand.id,
-          status: "NEW",
-          responseDeadline: deadline,
-          sentAt: now,
-          items: {
-            // Nested create inherits supplierId + companyId from the parent
-            // composite FK — do not pass those fields (Prisma rejects them).
-            create: preview.requirement.items.map((item) => ({
-              id: createId(),
-              requirementItemId: item.id,
-              productId: item.product.id,
-              quantityRequested: new Prisma.Decimal(item.quantityPlanned),
-            })),
-          },
-        },
-      });
-      ids.push(requestId);
-
-      const supplierUsers = await tx.user.findMany({
-        where: {
-          companyId: user.companyId,
-          supplierId: supplier.id,
-          role: "SUPPLIER",
-          isActive: true,
-        },
-        select: { id: true },
-      });
-      for (const su of supplierUsers) {
-        await createUserNotification({
-          tx,
-          userId: su.id,
-          title: "New supplier request",
-          body: `A new request was sent for brand ${preview.requirement.brand.name}.`,
-          entityType: "SupplierRequest",
-          entityId: requestId,
-        });
-      }
-    }
-
-    if (ids.length === 0) {
-      throw new RequestDomainError(
-        "DUPLICATE_REQUEST",
-        "All selected suppliers already have an active request.",
-      );
-    }
-
-    await writeAuditLog({
-      tx,
-      actorUserId: user.id,
-      entityType: "Requirement",
-      entityId: parsed.data.requirementId,
-      action: "UPDATE",
-      afterJson: {
-        event: "SUPPLIER_REQUESTS_DISTRIBUTED",
-        mode: parsed.data.mode,
-        requestIds: ids,
-        supplierCount: ids.length,
-        responseDeadline: deadline?.toISOString() ?? null,
-      },
-    });
-
-    return ids;
-  });
-
-  return { requestIds: createdIds, count: createdIds.length };
+  return {
+    requestIds: result.requestIds,
+    count: result.requestIds.length,
+    skippedSupplierIds: result.skippedSupplierIds,
+  };
 }

@@ -10,15 +10,16 @@ const badgeVariants = cva(
       variant: {
         default: "bg-primary text-primary-foreground [a]:hover:bg-primary/90",
         secondary:
-          "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
+          "border border-border bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
         destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
-        success: "bg-success/15 text-success",
-        warning: "bg-warning/15 text-warning-foreground",
+          "border border-destructive/40 bg-destructive/15 text-destructive focus-visible:ring-destructive/30 [a]:hover:bg-destructive/25",
+        success:
+          "border border-success/40 bg-success/15 text-success [a]:hover:bg-success/25",
+        warning:
+          "border border-warning/40 bg-warning/15 text-warning [a]:hover:bg-warning/25",
         outline:
-          "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-foreground",
-        ghost:
-          "hover:bg-muted hover:text-foreground dark:hover:bg-muted/50",
+          "border-border bg-card text-foreground [a]:hover:bg-secondary [a]:hover:text-foreground",
+        ghost: "hover:bg-secondary hover:text-foreground",
         link: "text-foreground underline decoration-primary underline-offset-4 hover:underline",
       },
     },

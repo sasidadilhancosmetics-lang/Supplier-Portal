@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 
 import { isAuthorizationError } from "@/lib/auth/errors";
 import {
@@ -15,6 +16,15 @@ import {
 export type ActionResult =
   | { ok: true }
   | { ok: false; error: string; fieldErrors?: Record<string, string> };
+
+function isNextRedirect(error: unknown): boolean {
+  return (
+    !!error &&
+    typeof error === "object" &&
+    "digest" in error &&
+    String((error as { digest?: string }).digest).startsWith("NEXT_REDIRECT")
+  );
+}
 
 function toError(error: unknown): ActionResult {
   if (isAuthorizationError(error)) {
@@ -36,16 +46,20 @@ function linesFromForm(formData: FormData) {
     const expectedVersionRaw = String(
       formData.get(`expectedVersion:${requestItemId}`) ?? "",
     ).trim();
+    const notAvailable = String(formData.get(`notAvailable:${requestItemId}`) ?? "") === "true";
+    const quantity = String(formData.get(`quantityDeclared:${requestItemId}`) ?? "");
+    const date = String(formData.get(`availableDate:${requestItemId}`) ?? "");
+    const extraQuantities = formData.getAll(`splitQuantity:${requestItemId}`).map(String);
+    const extraDates = formData.getAll(`splitDate:${requestItemId}`).map(String);
+    const hasSplits = !notAvailable && (extraQuantities.length > 0 || extraDates.length > 0);
     return {
       requestItemId,
-      quantityDeclared: String(
-        formData.get(`quantityDeclared:${requestItemId}`) ?? "",
-      ),
-      availableDate: String(
-        formData.get(`availableDate:${requestItemId}`) ?? "",
-      ),
-      notAvailable:
-        String(formData.get(`notAvailable:${requestItemId}`) ?? "") === "true",
+      ...(!hasSplits ? { quantityDeclared: quantity, availableDate: date } : {
+        splits: [{ quantity, date }, ...Array.from({ length: Math.max(extraDates.length, extraQuantities.length) },
+          (_, index) => ({ quantity: extraQuantities[index], date: extraDates[index] }))],
+      }),
+      unitPrice: notAvailable ? "" : String(formData.get(`unitPrice:${requestItemId}`) ?? ""),
+      notAvailable,
       notes: String(formData.get(`notes:${requestItemId}`) ?? ""),
       // Omit blank versions so Zod optional does not coerce "" → 0.
       ...(expectedVersionRaw
@@ -86,8 +100,10 @@ export async function submitAvailabilityAction(
     revalidatePath(`/supplier/requests/${supplierRequestId}`);
     revalidatePath("/supplier/requests");
     revalidatePath("/staff/requests");
-    return { ok: true };
+    // Success: leave the form and flash on the list. Errors stay on the form.
+    redirect("/supplier/requests?flash=availability-submitted");
   } catch (error) {
+    if (isNextRedirect(error)) throw error;
     return toError(error);
   }
 }

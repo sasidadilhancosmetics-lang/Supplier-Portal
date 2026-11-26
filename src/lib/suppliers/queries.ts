@@ -121,6 +121,8 @@ export async function getSupplierForAdmin(supplierId: string) {
     rejectionReason: supplier.rejectionReason,
     reviewedAt: supplier.reviewedAt,
     supportsAllBrands: supplier.supportsAllBrands,
+    /** Cosmo OS Supplier.id — company-scoped; never name-matched. */
+    externalId: supplier.externalId,
     contactName: supplier.contactName,
     contactEmail: supplier.contactEmail,
     contactPhone: supplier.contactPhone,

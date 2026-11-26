@@ -143,7 +143,7 @@ export default function StaffRequestsPage({ searchParams }: PageProps) {
         </h1>
         <p className="text-base leading-7 text-muted-foreground">
           Review sent requests, pending responses, and submitted availability.
-          Order allocation is not enabled yet.
+          Open a request to allocate an order from lines with an active reserve.
         </p>
       </div>
       <Suspense fallback={<p className="text-sm text-muted-foreground">Loading…</p>}>

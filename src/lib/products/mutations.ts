@@ -3,13 +3,9 @@ import "server-only";
 import { requireStaffPermission } from "@/lib/auth/guards";
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/db";
-import { createId } from "@/lib/id";
 
 import { ProductDomainError } from "./errors";
-import {
-  createProvisionalProductSchema,
-  updateProductSchema,
-} from "./schema";
+import { updateProductSchema } from "./schema";
 
 async function assertBrandInCompany(companyId: string, brandId: string) {
   const brand = await prisma.brand.findFirst({
@@ -19,61 +15,6 @@ async function assertBrandInCompany(companyId: string, brandId: string) {
   if (!brand) {
     throw new ProductDomainError("INVALID_BRAND", "Brand is invalid.");
   }
-}
-
-/**
- * Create a development/test product as PROVISIONAL only.
- * Never invents ERP-linked masters or erpItemId values.
- */
-export async function createProvisionalProduct(raw: unknown) {
-  const user = await requireStaffPermission("MANAGE_PRODUCTS");
-  const parsed = createProvisionalProductSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ProductDomainError(
-      "VALIDATION",
-      parsed.error.issues[0]?.message ?? "Invalid product details.",
-    );
-  }
-  const input = parsed.data;
-  await assertBrandInCompany(user.companyId, input.brandId);
-
-  const created = await prisma.$transaction(async (tx) => {
-    const product = await tx.product.create({
-      data: {
-        id: createId(),
-        companyId: user.companyId,
-        brandId: input.brandId,
-        name: input.name,
-        sku: input.sku ?? null,
-        unitOfMeasure: input.unitOfMeasure ?? null,
-        priorityStatus: input.priorityStatus,
-        masterStatus: "PROVISIONAL",
-        erpItemId: null,
-        cosmoItemId: null,
-        isActive: input.isActive,
-      },
-    });
-
-    await writeAuditLog({
-      tx,
-      actorUserId: user.id,
-      entityType: "Product",
-      entityId: product.id,
-      action: "CREATE",
-      afterJson: {
-        event: "PRODUCT_PROVISIONAL_CREATED",
-        name: product.name,
-        brandId: product.brandId,
-        sku: product.sku,
-        priorityStatus: product.priorityStatus,
-        masterStatus: product.masterStatus,
-      },
-    });
-
-    return product;
-  });
-
-  return { id: created.id };
 }
 
 /**

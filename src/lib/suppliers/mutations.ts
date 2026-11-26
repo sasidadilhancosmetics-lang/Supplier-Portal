@@ -1,9 +1,11 @@
 import "server-only";
 
 import type { Prisma, SupplierStatus } from "@/generated/prisma/client";
+import { Prisma as PrismaNS } from "@/generated/prisma/client";
 
 import { requireAdmin } from "@/lib/auth/guards";
 import { prisma } from "@/lib/db";
+import { remapOsfRequestSuggestionsForCosmoIds } from "@/lib/osf-imports/suggestion-remap";
 
 import { writeSupplierAuditLog } from "./audit";
 import {
@@ -12,9 +14,12 @@ import {
 } from "./brand-rules";
 import { ACTIVE_SUPPLIER_REQUEST_STATUSES } from "./constants";
 import { SupplierDomainError } from "./errors";
+import { lockSuppliers } from "./locking";
 import {
   createSupplierSchema,
+  mapUnresolvedCosmoSupplierSchema,
   supplierStatusChangeSchema,
+  updateSupplierExternalIdSchema,
   updateSupplierSchema,
   type SupplierProfileInput,
 } from "./schema";
@@ -42,8 +47,9 @@ async function assertUniqueSupplierName(
   companyId: string,
   name: string,
   excludeId?: string,
+  client: Pick<Prisma.TransactionClient, "supplier"> = prisma,
 ) {
-  const existing = await prisma.supplier.findFirst({
+  const existing = await client.supplier.findFirst({
     where: {
       companyId,
       name: { equals: name, mode: "insensitive" },
@@ -63,13 +69,14 @@ async function assertUniqueSupplierName(
 async function assertBrandsBelongToCompany(
   companyId: string,
   brandIds: string[],
+  client: Pick<Prisma.TransactionClient, "brand"> = prisma,
 ) {
   if (brandIds.length === 0) {
     return;
   }
 
   const uniqueIds = [...new Set(brandIds)];
-  const count = await prisma.brand.count({
+  const count = await client.brand.count({
     where: {
       companyId,
       id: { in: uniqueIds },
@@ -84,9 +91,10 @@ async function assertBrandsBelongToCompany(
   }
 }
 
-async function loadActiveRequestBrandIds(supplierId: string) {
-  const rows = await prisma.supplierRequest.findMany({
+async function loadActiveRequestBrandIds(tx: Prisma.TransactionClient, companyId: string, supplierId: string) {
+  const rows = await tx.supplierRequest.findMany({
     where: {
+      companyId,
       supplierId,
       status: { in: [...ACTIVE_SUPPLIER_REQUEST_STATUSES] },
     },
@@ -213,49 +221,50 @@ export async function updateSupplierProfile(raw: unknown) {
   }
 
   const input = parsed.data;
-  const existing = await prisma.supplier.findFirst({
-    where: { id: input.supplierId, companyId: admin.companyId },
-    include: { brands: { select: { brandId: true } } },
-  });
+  await prisma.$transaction(async (tx) => {
+    await lockSuppliers(tx, admin.companyId, [input.supplierId]);
+    const existing = await tx.supplier.findFirst({
+      where: { id: input.supplierId, companyId: admin.companyId },
+      include: { brands: { select: { brandId: true } } },
+    });
 
-  if (!existing) {
-    throw new SupplierDomainError("NOT_FOUND", "Supplier not found.");
-  }
+    if (!existing) {
+      throw new SupplierDomainError("NOT_FOUND", "Supplier not found.");
+    }
 
-  await assertUniqueSupplierName(admin.companyId, input.name, existing.id);
-  await assertBrandsBelongToCompany(admin.companyId, input.brandIds);
+    await assertUniqueSupplierName(admin.companyId, input.name, existing.id, tx);
+    await assertBrandsBelongToCompany(admin.companyId, input.brandIds, tx);
 
-  const currentBrandIds = existing.brands.map((b) => b.brandId);
-  const nextBrandIds = [...new Set(input.brandIds)];
-  const activeRequestBrandIds = await loadActiveRequestBrandIds(existing.id);
+    const currentBrandIds = existing.brands.map((b) => b.brandId);
+    const nextBrandIds = [...new Set(input.brandIds)];
+    const activeRequestBrandIds = await loadActiveRequestBrandIds(tx, admin.companyId, existing.id);
 
-  const blocked = blockedBrandRemovals({
-    currentBrandIds,
-    nextBrandIds,
-    activeRequestBrandIds,
-  });
-  if (blocked.length > 0) {
-    throw new SupplierDomainError(
-      "BRAND_LOCKED",
-      "Cannot remove a brand that has an active supplier request.",
-    );
-  }
-
-  if (
-    !canDisableSupportsAllBrands({
-      currentlySupportsAll: existing.supportsAllBrands,
-      nextSupportsAll: input.supportsAllBrands,
+    const blocked = blockedBrandRemovals({
+      currentBrandIds,
       nextBrandIds,
       activeRequestBrandIds,
-    })
-  ) {
-    throw new SupplierDomainError(
-      "ALL_BRANDS_LOCKED",
-      "Cannot turn off All Brands while active requests exist for brands not still selected.",
-    );
-  }
+    });
+    if (blocked.length > 0) {
+      throw new SupplierDomainError(
+        "BRAND_LOCKED",
+        "Cannot remove a brand that has an active supplier request.",
+      );
+    }
 
-  await prisma.$transaction(async (tx) => {
+    if (
+      !canDisableSupportsAllBrands({
+        currentlySupportsAll: existing.supportsAllBrands,
+        nextSupportsAll: input.supportsAllBrands,
+        nextBrandIds,
+        activeRequestBrandIds,
+      })
+    ) {
+      throw new SupplierDomainError(
+        "ALL_BRANDS_LOCKED",
+        "Cannot turn off All Brands while active requests exist for brands not still selected.",
+      );
+    }
+
     const before = profileSnapshot({
       name: existing.name,
       status: existing.status,
@@ -337,10 +346,17 @@ export async function updateSupplierProfile(raw: unknown) {
           removed: brandDelta.toRemove,
         },
       });
+
+      if (existing.externalId) {
+        await remapOsfRequestSuggestionsForCosmoIds(tx, {
+          companyId: admin.companyId,
+          cosmoSupplierIds: [existing.externalId],
+        });
+      }
     }
   });
 
-  return { id: existing.id };
+  return { id: input.supplierId };
 }
 
 export async function changeSupplierStatus(raw: unknown) {
@@ -357,6 +373,7 @@ export async function changeSupplierStatus(raw: unknown) {
       status: true,
       registrationSource: true,
       rejectionReason: true,
+      externalId: true,
     },
   });
 
@@ -410,9 +427,222 @@ export async function changeSupplierStatus(raw: unknown) {
             : "SUPPLIER_DEACTIVATED",
       },
     });
+
+    // Rematch suggestions when ACTIVE eligibility may have changed.
+    if (existing.externalId) {
+      await remapOsfRequestSuggestionsForCosmoIds(tx, {
+        companyId: admin.companyId,
+        cosmoSupplierIds: [existing.externalId],
+      });
+    }
   });
 
   return { id: existing.id, status: parsed.data.status };
+}
+
+function normalizeExternalIdCompare(
+  value: string | null | undefined,
+): string | null {
+  if (value == null) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+/**
+ * Set or clear Cosmo OS Supplier.id on a Portal supplier (ADMIN only).
+ * Rematches OsfRequestSuggestion rows for affected Cosmo ids. Never creates
+ * SupplierRequests or PurchaseOrders.
+ */
+export async function updateSupplierExternalId(raw: unknown) {
+  const admin = await requireAdmin();
+  const parsed = updateSupplierExternalIdSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new SupplierDomainError(
+      "VALIDATION",
+      parsed.error.issues[0]?.message ?? "Invalid Cosmo supplier ID.",
+    );
+  }
+
+  const input = parsed.data;
+  const nextExternalId = input.externalId;
+  const expectedExternalId = normalizeExternalIdCompare(
+    input.expectedExternalId,
+  );
+
+  const existing = await prisma.supplier.findFirst({
+    where: { id: input.supplierId, companyId: admin.companyId },
+    select: { id: true, name: true, externalId: true, updatedAt: true },
+  });
+  if (!existing) {
+    throw new SupplierDomainError("NOT_FOUND", "Supplier not found.");
+  }
+
+  const currentExternalId = normalizeExternalIdCompare(existing.externalId);
+  if (currentExternalId !== expectedExternalId) {
+    throw new SupplierDomainError(
+      "EXTERNAL_ID_CONFLICT",
+      "This supplier's Cosmo mapping changed. Refresh and try again.",
+    );
+  }
+
+  if (currentExternalId === nextExternalId) {
+    // Identity unchanged — still rematch in case suggestion rows are stale.
+    const remapped =
+      nextExternalId == null
+        ? { updated: 0 }
+        : await prisma.$transaction((tx) =>
+            remapOsfRequestSuggestionsForCosmoIds(tx, {
+              companyId: admin.companyId,
+              cosmoSupplierIds: [nextExternalId],
+            }),
+          );
+    return {
+      id: existing.id,
+      externalId: currentExternalId,
+      remapped: remapped.updated,
+    };
+  }
+
+  if (currentExternalId != null && !input.confirmChange) {
+    throw new SupplierDomainError(
+      "CONFIRMATION_REQUIRED",
+      currentExternalId && nextExternalId == null
+        ? "Confirm clearing the Cosmo OS Supplier ID."
+        : "Confirm changing the Cosmo OS Supplier ID.",
+    );
+  }
+
+  if (nextExternalId != null) {
+    const clash = await prisma.supplier.findFirst({
+      where: {
+        companyId: admin.companyId,
+        externalId: nextExternalId,
+        NOT: { id: existing.id },
+      },
+      select: { id: true, name: true },
+    });
+    if (clash) {
+      throw new SupplierDomainError(
+        "DUPLICATE_EXTERNAL_ID",
+        "That Cosmo OS Supplier ID is already mapped to another supplier in this company.",
+      );
+    }
+  }
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      const updated = await tx.supplier.updateMany({
+        where: {
+          id: existing.id,
+          companyId: admin.companyId,
+          // Concurrent clear/set: match prior null via Prisma null filter.
+          ...(currentExternalId == null
+            ? { externalId: null }
+            : { externalId: currentExternalId }),
+        },
+        data: { externalId: nextExternalId },
+      });
+      if (updated.count !== 1) {
+        throw new SupplierDomainError(
+          "EXTERNAL_ID_CONFLICT",
+          "This supplier's Cosmo mapping changed. Refresh and try again.",
+        );
+      }
+
+      await writeSupplierAuditLog({
+        tx,
+        actorUserId: admin.id,
+        entityId: existing.id,
+        action: "EXTERNAL_ID_CHANGE",
+        beforeJson: { externalId: currentExternalId },
+        afterJson: {
+          externalId: nextExternalId,
+          event:
+            nextExternalId == null
+              ? "COSMO_EXTERNAL_ID_CLEARED"
+              : currentExternalId == null
+                ? "COSMO_EXTERNAL_ID_SET"
+                : "COSMO_EXTERNAL_ID_CHANGED",
+        },
+      });
+
+      const cosmoIds = [
+        ...(currentExternalId ? [currentExternalId] : []),
+        ...(nextExternalId ? [nextExternalId] : []),
+      ];
+      const remapped = await remapOsfRequestSuggestionsForCosmoIds(tx, {
+        companyId: admin.companyId,
+        cosmoSupplierIds: cosmoIds,
+      });
+
+      return { remapped: remapped.updated };
+    });
+
+    return {
+      id: existing.id,
+      externalId: nextExternalId,
+      remapped: result.remapped,
+    };
+  } catch (error) {
+    if (
+      error instanceof PrismaNS.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw new SupplierDomainError(
+        "DUPLICATE_EXTERNAL_ID",
+        "That Cosmo OS Supplier ID is already mapped to another supplier in this company.",
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * From OSF Import Review: map an unresolved Cosmo supplier id onto an existing
+ * Portal supplier in the same company (ADMIN — same as supplier edit).
+ */
+export async function mapUnresolvedCosmoSupplier(raw: unknown) {
+  const admin = await requireAdmin();
+  const parsed = mapUnresolvedCosmoSupplierSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new SupplierDomainError(
+      "VALIDATION",
+      parsed.error.issues[0]?.message ?? "Invalid mapping request.",
+    );
+  }
+
+  const input = parsed.data;
+  const cosmoSupplierId = input.cosmoSupplierId.trim();
+
+  const osfImport = await prisma.osfImport.findFirst({
+    where: { id: input.importId, companyId: admin.companyId },
+    select: { id: true },
+  });
+  if (!osfImport) {
+    throw new SupplierDomainError("NOT_FOUND", "Import not found.");
+  }
+
+  const unresolvedCount = await prisma.osfRequestSuggestion.count({
+    where: {
+      companyId: admin.companyId,
+      osfImportId: osfImport.id,
+      cosmoSupplierId,
+      mappingStatus: "UNRESOLVED_SUPPLIER",
+    },
+  });
+  if (unresolvedCount === 0) {
+    throw new SupplierDomainError(
+      "NOT_FOUND",
+      "No unresolved Cosmo supplier suggestions found for that ID on this import.",
+    );
+  }
+
+  return updateSupplierExternalId({
+    supplierId: input.portalSupplierId,
+    externalId: cosmoSupplierId,
+    confirmChange: input.confirmChange,
+    expectedExternalId: input.expectedPortalExternalId ?? null,
+  });
 }
 
 export type { SupplierProfileInput };

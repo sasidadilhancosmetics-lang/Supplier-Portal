@@ -5,7 +5,34 @@ import {
   distributeRequirementSchema,
   saveAvailabilityDraftSchema,
   submitAvailabilitySchema,
+  supplierRequestListQuerySchema,
 } from "./schema";
+
+describe("supplierRequestListQuerySchema", () => {
+  it("accepts ACTION_REQUIRED filter", () => {
+    const parsed = supplierRequestListQuerySchema.parse({
+      status: "ACTION_REQUIRED",
+      page: "1",
+    });
+    expect(parsed.status).toBe("ACTION_REQUIRED");
+    expect(parsed.page).toBe(1);
+  });
+
+  it("accepts ALL filter for browsing completed requests", () => {
+    const parsed = supplierRequestListQuerySchema.parse({
+      status: "ALL",
+      page: "1",
+    });
+    expect(parsed.status).toBe("ALL");
+  });
+
+  it("rejects unknown status values", () => {
+    const result = supplierRequestListQuerySchema.safeParse({
+      status: "NOT_A_STATUS",
+    });
+    expect(result.success).toBe(false);
+  });
+});
 
 describe("distributeRequirementSchema", () => {
   it("accepts all-matching with optional deadline", () => {
@@ -26,6 +53,19 @@ describe("distributeRequirementSchema", () => {
       responseDeadline: "not-a-date",
     });
     expect(result.success).toBe(false);
+  });
+
+  it("accepts optional quantity overrides", () => {
+    const parsed = distributeRequirementSchema.parse({
+      requirementId: "req_1",
+      mode: "ALL_MATCHING",
+      quantityOverrides: [
+        { requirementItemId: "ri_1", quantityRequested: "12" },
+      ],
+      acknowledgeOverQty: true,
+    });
+    expect(parsed.quantityOverrides?.[0]?.quantityRequested).toBe(12);
+    expect(parsed.acknowledgeOverQty).toBe(true);
   });
 });
 
@@ -77,7 +117,7 @@ describe("availability schemas", () => {
         },
       ],
     });
-    expect(parsed.lines[0]?.quantityDeclared).toBe(0);
+    expect(parsed.lines[0]?.quantityDeclared).toBe("0");
     expect(parsed.lines[0]?.notAvailable).toBe(false);
   });
 
@@ -108,6 +148,7 @@ describe("availability schemas", () => {
         {
           requestItemId: "ri_pos",
           quantityDeclared: "5",
+          unitPrice: "100.50",
           availableDate: "2026-11-25",
           notAvailable: false,
           expectedVersion: 1,
@@ -115,23 +156,61 @@ describe("availability schemas", () => {
       ],
     });
     expect(parsed.lines[0]?.quantityDeclared).toBeNull();
-    expect(parsed.lines[1]?.quantityDeclared).toBe(5);
+    expect(parsed.lines[1]?.quantityDeclared).toBe("5");
+    expect(parsed.lines[1]?.unitPrice).toBe(100.5);
     expect(parsed.lines[1]?.availableDate).toBe("2026-11-25");
   });
 
-  it("accepts positive quantity with delivery date", () => {
+  it("accepts positive quantity with delivery date and unit price", () => {
     const parsed = submitAvailabilitySchema.parse({
       supplierRequestId: "sr_1",
       lines: [
         {
           requestItemId: "ri_1",
           quantityDeclared: 12.5,
+          unitPrice: 250,
           availableDate: "2026-12-01",
           notAvailable: false,
         },
       ],
     });
-    expect(parsed.lines[0]?.quantityDeclared).toBe(12.5);
+    expect(parsed.lines[0]?.quantityDeclared).toBe("12.5");
+    expect(parsed.lines[0]?.unitPrice).toBe(250);
+  });
+
+  it("requires unit price when available quantity is positive", () => {
+    const result = submitAvailabilitySchema.safeParse({
+      supplierRequestId: "sr_1",
+      lines: [
+        {
+          requestItemId: "ri_1",
+          quantityDeclared: "5",
+          availableDate: "2026-11-25",
+          notAvailable: false,
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const fieldErrors = availabilityFieldErrorsFromZod(result.error, [
+        { requestItemId: "ri_1" },
+      ]);
+      expect(fieldErrors["ri_1:unitPrice"]).toMatch(/unit price/i);
+    }
+  });
+
+  it("rejects unit price on not-available lines", () => {
+    const result = submitAvailabilitySchema.safeParse({
+      supplierRequestId: "sr_1",
+      lines: [
+        {
+          requestItemId: "ri_1",
+          notAvailable: true,
+          unitPrice: "99",
+        },
+      ],
+    });
+    expect(result.success).toBe(false);
   });
 
   it("maps zod issues to per-line field errors", () => {

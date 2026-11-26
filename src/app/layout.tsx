@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import type { ReactNode } from "react";
 import { Suspense } from "react";
 
+import { BrandLogo } from "@/components/brand-logo";
 import {
   SiteHeaderAsync,
   SiteHeaderFallback,
@@ -37,12 +38,12 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`dark ${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="flex min-h-full flex-col">
+      <body className="flex min-h-full flex-col bg-background text-foreground">
         <a
           href="#main-content"
-          className="absolute left-4 top-4 z-50 -translate-y-20 rounded-md border border-border bg-background px-3 py-2 text-sm font-medium text-foreground ring-2 ring-ring focus:translate-y-0"
+          className="absolute left-4 top-4 z-50 -translate-y-20 rounded-md border border-border bg-card px-3 py-2 text-sm font-medium text-foreground ring-2 ring-ring focus:translate-y-0"
         >
           Skip to content
         </a>
@@ -56,9 +57,17 @@ export default function RootLayout({
           {children}
         </main>
         <footer className="border-t border-border bg-background">
-          <p className="mx-auto w-full max-w-5xl px-4 py-4 text-sm text-muted-foreground">
-            Supplier Portal · secure company and supplier workspace
-          </p>
+          <div className="mx-auto flex w-full max-w-5xl items-center gap-3 px-4 py-4">
+            <BrandLogo
+              variant="mark"
+              size="sm"
+              decorative
+              className="shrink-0 opacity-90"
+            />
+            <p className="text-sm text-muted-foreground">
+              Supplier Portal · company and supplier workspace
+            </p>
+          </div>
         </footer>
       </body>
     </html>

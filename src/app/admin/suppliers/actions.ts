@@ -7,6 +7,7 @@ import { isAuthorizationError } from "@/lib/auth/errors";
 import {
   changeSupplierStatus,
   createSupplier,
+  updateSupplierExternalId,
   updateSupplierProfile,
 } from "@/lib/suppliers/mutations";
 import {
@@ -108,6 +109,35 @@ export async function changeSupplierStatusAction(
     if (isSupplierDomainError(error) || isAuthorizationError(error)) {
       return toActionError(error);
     }
+    return toActionError(error);
+  }
+}
+
+export async function updateSupplierExternalIdAction(
+  _prev: ActionResult | undefined,
+  formData: FormData,
+): Promise<ActionResult> {
+  try {
+    const supplierId = String(formData.get("supplierId") ?? "");
+    const expectedRaw = formData.get("expectedExternalId");
+    const expectedExternalId =
+      expectedRaw == null || String(expectedRaw) === ""
+        ? null
+        : String(expectedRaw);
+    await updateSupplierExternalId({
+      supplierId,
+      externalId: String(formData.get("externalId") ?? ""),
+      confirmChange:
+        formData.get("confirmChange") === "true" ||
+        formData.get("confirmChange") === "on" ||
+        formData.get("confirmChange") === "1",
+      expectedExternalId,
+    });
+    revalidatePath("/admin/suppliers");
+    revalidatePath(`/admin/suppliers/${supplierId}`);
+    revalidatePath("/staff/osf-imports");
+    return { ok: true };
+  } catch (error) {
     return toActionError(error);
   }
 }

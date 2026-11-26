@@ -14,6 +14,7 @@ vi.mock("@/lib/db", () => ({
     user: { findMany: vi.fn() },
     auditLog: { create: vi.fn() },
     notification: { create: vi.fn() },
+    $queryRaw: vi.fn(),
     $transaction: vi.fn(async (fn: (tx: unknown) => Promise<unknown>) => {
       const { prisma } = await import("@/lib/db");
       return fn(prisma);
@@ -53,6 +54,7 @@ describe("distribute authorization", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     requirePerm.mockResolvedValue(staffUser);
+    vi.mocked(prisma.$queryRaw).mockResolvedValue([{ id: "sup_1" }]);
   });
 
   it("requires SEND_SUPPLIER_REQUEST for preview", async () => {

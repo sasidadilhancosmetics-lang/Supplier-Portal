@@ -230,6 +230,103 @@ export async function removeDraftRequirementItem(raw: unknown) {
   return { id: existing.id };
 }
 
+type Tx = Prisma.TransactionClient;
+
+/**
+ * Confirm one DRAFT requirement inside an existing transaction.
+ * Reused by single-requirement confirm and OSF import batch confirm (Phase E).
+ */
+export async function confirmRequirementInTransaction(
+  tx: Tx,
+  args: {
+    requirementId: string;
+    companyId: string;
+    actorUserId: string;
+    now?: Date;
+  },
+): Promise<{ id: string; status: "CONFIRMED"; already: boolean }> {
+  const existing = await tx.requirement.findFirst({
+    where: { id: args.requirementId, companyId: args.companyId },
+    include: {
+      _count: { select: { items: true } },
+      items: {
+        select: {
+          id: true,
+          productId: true,
+          quantityPlanned: true,
+        },
+      },
+    },
+  });
+  if (!existing) {
+    throw new RequirementDomainError("NOT_FOUND", "Requirement not found.");
+  }
+
+  if (existing.status === "CONFIRMED") {
+    return { id: existing.id, status: "CONFIRMED", already: true };
+  }
+
+  if (existing.status !== "DRAFT") {
+    throw new RequirementDomainError(
+      "NOT_DRAFT",
+      "Only draft requirements can be confirmed.",
+    );
+  }
+
+  if (existing._count.items < 1 || existing.items.length < 1) {
+    throw new RequirementDomainError(
+      "EMPTY_ITEMS",
+      "Add at least one product before confirming.",
+    );
+  }
+
+  for (const item of existing.items) {
+    if (!item.productId || Number(item.quantityPlanned) <= 0) {
+      throw new RequirementDomainError(
+        "VALIDATION",
+        "Every requirement item must have a product and positive planned quantity.",
+      );
+    }
+  }
+
+  const now = args.now ?? new Date();
+  const claimed = await tx.requirement.updateMany({
+    where: {
+      id: existing.id,
+      companyId: args.companyId,
+      status: "DRAFT",
+    },
+    data: {
+      status: "CONFIRMED",
+      confirmedAt: now,
+      confirmedById: args.actorUserId,
+    },
+  });
+
+  if (claimed.count !== 1) {
+    throw new RequirementDomainError(
+      "ALREADY_CONFIRMED",
+      "This requirement was already confirmed.",
+    );
+  }
+
+  await writeAuditLog({
+    tx,
+    actorUserId: args.actorUserId,
+    entityType: "Requirement",
+    entityId: existing.id,
+    action: "STATUS_CHANGE",
+    beforeJson: { status: "DRAFT" },
+    afterJson: {
+      status: "CONFIRMED",
+      event: "REQUIREMENT_CONFIRMED",
+      confirmedAt: now.toISOString(),
+    },
+  });
+
+  return { id: existing.id, status: "CONFIRMED", already: false };
+}
+
 /**
  * Confirm a draft. Idempotent if already CONFIRMED by the same flow guard;
  * concurrent confirms use updateMany status=DRAFT claim.
@@ -241,68 +338,11 @@ export async function confirmRequirement(raw: unknown) {
     throw new RequirementDomainError("VALIDATION", "Invalid confirmation.");
   }
 
-  const existing = await prisma.requirement.findFirst({
-    where: { id: parsed.data.requirementId, companyId: user.companyId },
-    include: { _count: { select: { items: true } } },
-  });
-  if (!existing) {
-    throw new RequirementDomainError("NOT_FOUND", "Requirement not found.");
-  }
-
-  if (existing.status === "CONFIRMED") {
-    return { id: existing.id, status: "CONFIRMED" as const, already: true };
-  }
-
-  if (existing.status !== "DRAFT") {
-    throw new RequirementDomainError(
-      "NOT_DRAFT",
-      "Only draft requirements can be confirmed.",
-    );
-  }
-
-  if (existing._count.items < 1) {
-    throw new RequirementDomainError(
-      "EMPTY_ITEMS",
-      "Add at least one product before confirming.",
-    );
-  }
-
-  const now = new Date();
-  await prisma.$transaction(async (tx) => {
-    const claimed = await tx.requirement.updateMany({
-      where: {
-        id: existing.id,
-        companyId: user.companyId,
-        status: "DRAFT",
-      },
-      data: {
-        status: "CONFIRMED",
-        confirmedAt: now,
-        confirmedById: user.id,
-      },
-    });
-
-    if (claimed.count !== 1) {
-      throw new RequirementDomainError(
-        "ALREADY_CONFIRMED",
-        "This requirement was already confirmed.",
-      );
-    }
-
-    await writeAuditLog({
-      tx,
+  return prisma.$transaction(async (tx) =>
+    confirmRequirementInTransaction(tx, {
+      requirementId: parsed.data.requirementId,
+      companyId: user.companyId,
       actorUserId: user.id,
-      entityType: "Requirement",
-      entityId: existing.id,
-      action: "STATUS_CHANGE",
-      beforeJson: { status: "DRAFT" },
-      afterJson: {
-        status: "CONFIRMED",
-        event: "REQUIREMENT_CONFIRMED",
-        confirmedAt: now.toISOString(),
-      },
-    });
-  });
-
-  return { id: existing.id, status: "CONFIRMED" as const, already: false };
+    }),
+  );
 }

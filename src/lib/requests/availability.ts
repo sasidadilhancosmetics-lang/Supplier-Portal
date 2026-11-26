@@ -13,12 +13,25 @@ import {
 import { writeAuditLog } from "@/lib/audit";
 import { prisma } from "@/lib/db";
 import { createId } from "@/lib/id";
+import { loadSavedRequestPrices } from "@/lib/supplier/catalogue";
+import { compatibleCataloguePrice } from "@/lib/supplier/catalogue-price-suggestion";
 import { createUserNotification } from "@/lib/notifications";
 
 import { parseCalendarDateInput } from "@/lib/dates";
 
-import { computeReserveExpiresAt } from "./constants";
+import { isPricingDomainError } from "@/lib/pricing/errors";
+import { recordSupplierAvailabilityPrice } from "@/lib/pricing/quotes";
+import { isAgreedPriceStatus } from "@/lib/pricing/status";
+import {
+  buildCounterNegotiationDisplay,
+  loadLastPurchasesForSupplierProducts,
+  loadPreviousSupplierQuotedPrice,
+  type CounterNegotiationDisplay,
+} from "@/lib/pricing/supplier-negotiation-display";
+
 import { RequestDomainError } from "./errors";
+import { resolveReserveOnSubmit } from "./reserve";
+import { readAvailabilitySplits, totalAvailability, type AvailabilitySplit } from "./availability-splits";
 import {
   availabilityFieldErrorsFromZod,
   saveAvailabilityDraftSchema,
@@ -27,23 +40,34 @@ import {
 
 type LineInput = {
   requestItemId: string;
-  quantityDeclared?: number | null;
+  quantityDeclared?: string | null;
+  splits?: AvailabilitySplit[];
+  unitPrice?: number | null;
   availableDate?: string;
   notAvailable: boolean;
   notes?: string;
   expectedVersion?: number;
 };
 
-function parseQty(line: LineInput): number | null {
-  if (line.notAvailable) return 0;
+function parseQty(line: LineInput): Prisma.Decimal | null {
+  if (line.notAvailable) return new PrismaNS.Decimal(0);
+  if (line.splits) return new PrismaNS.Decimal(totalAvailability(line.splits));
   if (line.quantityDeclared === null || line.quantityDeclared === undefined) {
     return null;
   }
-  const n = Number(line.quantityDeclared);
-  if (!Number.isFinite(n) || n < 0) {
-    throw new RequestDomainError("VALIDATION", "Invalid quantity.");
-  }
-  return n;
+  return new PrismaNS.Decimal(line.quantityDeclared);
+}
+
+function availabilityDate(line: LineInput) {
+  return line.notAvailable ? null : parseDate(line.splits?.[0]?.date ?? line.availableDate);
+}
+
+function persistedSplits(line: LineInput) {
+  return !line.notAvailable && line.splits ? line.splits : PrismaNS.DbNull;
+}
+
+function assertOfferVersion(count: number) {
+  if (count !== 1) throw new RequestDomainError("STALE_VERSION", "This line was updated elsewhere. Reload and try again.");
 }
 
 function parseDate(value: string | undefined): Date | null {
@@ -59,9 +83,37 @@ async function loadOwnedRequest(supplierRequestId: string, supplierId: string) {
   const request = await prisma.supplierRequest.findFirst({
     where: { id: supplierRequestId, supplierId },
     include: {
+      brand: { select: { id: true, name: true } },
       items: {
         include: {
-          availabilityOffer: true,
+          availabilityOffer: {
+            include: {
+              priceAgreement: {
+                include: {
+                  currentQuote: {
+                    select: {
+                      id: true,
+                      unitPrice: true,
+                      currencyCode: true,
+                      status: true,
+                      kind: true,
+                      createdAt: true,
+                      availabilityOfferId: true,
+                      supersedesQuote: {
+                        select: {
+                          id: true,
+                          unitPrice: true,
+                          currencyCode: true,
+                          kind: true,
+                          createdAt: true,
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
           product: {
             select: {
               id: true,
@@ -182,14 +234,7 @@ export async function saveAvailabilityDraft(raw: unknown) {
       }
 
       const qty = parseQty(line);
-      if (line.notAvailable) {
-        // Draft NA marker: store as DRAFT with qty 0 until submit.
-      }
-      if (qty !== null && qty < 0) {
-        throw new RequestDomainError("VALIDATION", "Quantity cannot be negative.");
-      }
-
-      const availableDate = parseDate(line.availableDate);
+      const availableDate = availabilityDate(line);
       const existing = item.availabilityOffer;
 
       if (
@@ -208,20 +253,30 @@ export async function saveAvailabilityDraft(raw: unknown) {
         continue;
       }
 
-      const declared = qty ?? 0;
+      const declared = qty ?? new PrismaNS.Decimal(0);
+      const draftPrice =
+        line.notAvailable || declared.lessThanOrEqualTo(0)
+          ? null
+          : line.unitPrice != null
+            ? new PrismaNS.Decimal(line.unitPrice)
+            : null;
       if (existing) {
-        await tx.availabilityOffer.update({
-          where: { id: existing.id },
+        const saved = await tx.availabilityOffer.updateMany({
+          where: { id: existing.id, version: existing.version },
           data: {
             status: "DRAFT",
             quantityDeclared: new PrismaNS.Decimal(declared),
+            unitPrice: draftPrice,
+            currencyCode: draftPrice ? "LKR" : null,
             availableDate: line.notAvailable ? null : availableDate,
+            availableSplits: persistedSplits(line),
             notes: line.notes ?? null,
             reservedAt: null,
             reserveExpiresAt: null,
             version: { increment: 1 },
           },
         });
+        assertOfferVersion(saved.count);
         await tx.availabilityChange.create({
           data: {
             id: createId(),
@@ -230,6 +285,8 @@ export async function saveAvailabilityDraft(raw: unknown) {
             changeType: "DRAFT_SAVED",
             quantityDeclaredBefore: existing.quantityDeclared,
             quantityDeclaredAfter: new PrismaNS.Decimal(declared),
+            unitPriceBefore: existing.unitPrice,
+            unitPriceAfter: draftPrice,
             statusBefore: existing.status,
             statusAfter: "DRAFT",
             availableDateBefore: existing.availableDate,
@@ -245,7 +302,10 @@ export async function saveAvailabilityDraft(raw: unknown) {
             supplierId: user.supplierId!,
             status: "DRAFT",
             quantityDeclared: new PrismaNS.Decimal(declared),
+            unitPrice: draftPrice,
+            currencyCode: draftPrice ? "LKR" : null,
             availableDate: line.notAvailable ? null : availableDate,
+            availableSplits: persistedSplits(line),
             notes: line.notes ?? null,
             reservedAt: null,
             reserveExpiresAt: null,
@@ -258,6 +318,7 @@ export async function saveAvailabilityDraft(raw: unknown) {
             actorUserId: user.id,
             changeType: "DRAFT_SAVED",
             quantityDeclaredAfter: new PrismaNS.Decimal(declared),
+            unitPriceAfter: draftPrice,
             statusAfter: "DRAFT",
             availableDateAfter: line.notAvailable ? null : availableDate,
           },
@@ -334,22 +395,19 @@ export async function submitAvailability(raw: unknown) {
         throw new RequestDomainError("NOT_FOUND", "Request line not found.");
       }
 
-      let qty = parseQty(line);
+      const qty = parseQty(line);
       // Unanswered on submit: skip (remain pending).
       if (qty === null && !line.notAvailable) {
         continue;
       }
 
-      const treatAsNa = line.notAvailable || qty === 0;
-      if (treatAsNa) {
-        qty = 0;
-      }
       if (qty === null) {
         continue;
       }
+      const treatAsNa = line.notAvailable || qty.isZero();
 
-      const availableDate = treatAsNa ? null : parseDate(line.availableDate);
-      if (!treatAsNa && qty > 0 && !availableDate) {
+      const availableDate = treatAsNa ? null : availabilityDate(line);
+      if (!treatAsNa && !availableDate) {
         throw new RequestDomainError(
           "VALIDATION",
           `Delivery date required for ${item.product.name}.`,
@@ -360,6 +418,36 @@ export async function submitAvailability(raw: unknown) {
       }
 
       const existing = item.availabilityOffer;
+      const priorAgreementEarly = existing?.priceAgreement ?? null;
+      const agreementLockedEarly =
+        priorAgreementEarly != null &&
+        isAgreedPriceStatus(priorAgreementEarly.status);
+
+      if (treatAsNa && line.unitPrice != null && !agreementLockedEarly) {
+        throw new RequestDomainError(
+          "VALIDATION",
+          `Do not enter a unit price when marking ${item.product.name} not available.`,
+          {
+            [`${item.id}:unitPrice`]:
+              "Clear unit price when marking not available.",
+          },
+        );
+      }
+      if (
+        !treatAsNa &&
+        !agreementLockedEarly &&
+        (line.unitPrice == null || line.unitPrice <= 0)
+      ) {
+        throw new RequestDomainError(
+          "VALIDATION",
+          `Unit price (LKR) is required for ${item.product.name}.`,
+          {
+            [`${item.id}:unitPrice`]:
+              "Enter a unit price in LKR greater than zero.",
+          },
+        );
+      }
+
       if (
         existing &&
         line.expectedVersion !== undefined &&
@@ -375,31 +463,25 @@ export async function submitAvailability(raw: unknown) {
         ? "NOT_AVAILABLE"
         : "SUBMITTED";
 
-      // Fresh reserve clock when entering SUBMITTED from anything except live SUBMITTED.
-      // While already SUBMITTED, preserve original reserveExpiresAt (no reset).
       const wasSubmitted = existing?.status === "SUBMITTED";
-      const needsFreshClock =
-        nextStatus === "SUBMITTED" && qty > 0 && !wasSubmitted;
-
-      let reservedAt = existing?.reservedAt ?? null;
-      let reserveExpiresAt = existing?.reserveExpiresAt ?? null;
-
-      if (nextStatus === "NOT_AVAILABLE") {
-        reservedAt = null;
-        reserveExpiresAt = null;
-      } else if (needsFreshClock) {
-        reservedAt = now;
-        reserveExpiresAt = computeReserveExpiresAt(now);
-      } else if (wasSubmitted) {
-        reservedAt = existing!.reservedAt;
-        reserveExpiresAt = existing!.reserveExpiresAt;
-      }
+      const reserve = resolveReserveOnSubmit({
+        nextStatus,
+        quantity: qty.toNumber(),
+        existing: existing
+          ? {
+              status: existing.status,
+              reservedAt: existing.reservedAt,
+              reserveExpiresAt: existing.reserveExpiresAt,
+            }
+          : null,
+        now,
+      });
+      const reservedAt = reserve.reservedAt;
+      const reserveExpiresAt = reserve.reserveExpiresAt;
 
       // New reserve must not include qty already committed to orders.
-      const orderedActive = existing
-        ? Number(existing.quantityOrderedActive)
-        : 0;
-      if (nextStatus === "SUBMITTED" && qty < orderedActive) {
+      const orderedActive = existing?.quantityOrderedActive ?? new PrismaNS.Decimal(0);
+      if (nextStatus === "SUBMITTED" && qty.lessThan(orderedActive)) {
         throw new RequestDomainError(
           "VALIDATION",
           `Available quantity for ${item.product.name} cannot be below already ordered quantity (${orderedActive}).`,
@@ -408,17 +490,35 @@ export async function submitAvailability(raw: unknown) {
 
       const warningBelowOrdered =
         nextStatus === "SUBMITTED" &&
-        orderedActive > 0 &&
-        qty < orderedActive;
+        orderedActive.greaterThan(0) &&
+        qty.lessThan(orderedActive);
+
+      const priorAgreement = priorAgreementEarly;
+      const agreementLocked = agreementLockedEarly;
+
+      // Agreed prices are independent of availability submit — never overwrite.
+      const nextUnitPrice =
+        nextStatus === "SUBMITTED"
+          ? agreementLocked && priorAgreement
+            ? priorAgreement.unitPrice
+            : line.unitPrice != null
+              ? new PrismaNS.Decimal(line.unitPrice)
+              : null
+          : null;
 
       if (existing) {
-        const beforeQty = Number(existing.quantityDeclared);
-        await tx.availabilityOffer.update({
-          where: { id: existing.id },
+        const beforeQty = existing.quantityDeclared;
+        const saved = await tx.availabilityOffer.updateMany({
+          where: { id: existing.id, version: existing.version },
           data: {
             status: nextStatus,
             quantityDeclared: new PrismaNS.Decimal(qty),
+            unitPrice: nextUnitPrice,
+            currencyCode: nextUnitPrice
+              ? (priorAgreement?.currencyCode ?? "LKR")
+              : null,
             availableDate,
+            availableSplits: persistedSplits(line),
             notes: line.notes ?? null,
             reservedAt,
             reserveExpiresAt,
@@ -428,15 +528,20 @@ export async function submitAvailability(raw: unknown) {
             version: { increment: 1 },
           },
         });
+        assertOfferVersion(saved.count);
 
         const changeType =
           nextStatus === "NOT_AVAILABLE"
             ? "MARKED_NOT_AVAILABLE"
-            : beforeQty > qty
+            : beforeQty.greaterThan(qty)
               ? "QUANTITY_DECREASED"
-              : beforeQty < qty
+              : beforeQty.lessThan(qty)
                 ? "QUANTITY_INCREASED"
-                : "SUBMITTED";
+                : nextUnitPrice &&
+                    (!existing.unitPrice ||
+                      !nextUnitPrice.equals(existing.unitPrice))
+                  ? "PRICE_CHANGED"
+                  : "SUBMITTED";
 
         await tx.availabilityChange.create({
           data: {
@@ -448,6 +553,8 @@ export async function submitAvailability(raw: unknown) {
             quantityDeclaredAfter: new PrismaNS.Decimal(qty),
             quantityOrderedActiveBefore: existing.quantityOrderedActive,
             quantityOrderedActiveAfter: existing.quantityOrderedActive,
+            unitPriceBefore: existing.unitPrice,
+            unitPriceAfter: nextUnitPrice,
             statusBefore: existing.status,
             statusAfter: nextStatus,
             availableDateBefore: existing.availableDate,
@@ -457,9 +564,44 @@ export async function submitAvailability(raw: unknown) {
         });
 
         if (
+          nextStatus === "SUBMITTED" &&
+          line.unitPrice != null &&
+          !agreementLocked
+        ) {
+          const prior = priorAgreement;
+          const samePrice =
+            prior != null && prior.unitPrice.equals(nextUnitPrice!);
+          if (!samePrice) {
+            try {
+              await recordSupplierAvailabilityPrice(tx, {
+                offerId: existing.id,
+                companyId: request.companyId,
+                supplierId: user.supplierId!,
+                productId: item.productId,
+                requestItemId: item.id,
+                supplierRequestId: request.id,
+                unitPrice: line.unitPrice,
+                currencyCode: "LKR",
+                quantityContext: qty,
+                availableDate,
+                actorUserId: user.id,
+                existingAgreement: prior,
+              });
+            } catch (error) {
+              if (isPricingDomainError(error)) {
+                throw new RequestDomainError("VALIDATION", error.message, {
+                  [`${item.id}:unitPrice`]: error.message,
+                });
+              }
+              throw error;
+            }
+          }
+        }
+
+        if (
           wasSubmitted &&
           nextStatus === "SUBMITTED" &&
-          qty < beforeQty
+          qty.lessThan(beforeQty)
         ) {
           notifiedDecrease = true;
         }
@@ -472,7 +614,10 @@ export async function submitAvailability(raw: unknown) {
             supplierId: user.supplierId!,
             status: nextStatus,
             quantityDeclared: new PrismaNS.Decimal(qty),
+            unitPrice: nextUnitPrice,
+            currencyCode: nextUnitPrice ? "LKR" : null,
             availableDate,
+            availableSplits: persistedSplits(line),
             notes: line.notes ?? null,
             reservedAt,
             reserveExpiresAt,
@@ -489,10 +634,37 @@ export async function submitAvailability(raw: unknown) {
                 ? "MARKED_NOT_AVAILABLE"
                 : "SUBMITTED",
             quantityDeclaredAfter: new PrismaNS.Decimal(qty),
+            unitPriceAfter: nextUnitPrice,
             statusAfter: nextStatus,
             availableDateAfter: availableDate,
           },
         });
+
+        if (nextStatus === "SUBMITTED" && line.unitPrice != null) {
+          try {
+            await recordSupplierAvailabilityPrice(tx, {
+              offerId,
+              companyId: request.companyId,
+              supplierId: user.supplierId!,
+              productId: item.productId,
+              requestItemId: item.id,
+              supplierRequestId: request.id,
+              unitPrice: line.unitPrice,
+              currencyCode: "LKR",
+              quantityContext: qty,
+              availableDate,
+              actorUserId: user.id,
+              existingAgreement: null,
+            });
+          } catch (error) {
+            if (isPricingDomainError(error)) {
+              throw new RequestDomainError("VALIDATION", error.message, {
+                [`${item.id}:unitPrice`]: error.message,
+              });
+            }
+            throw error;
+          }
+        }
       }
 
       submittedCount += 1;
@@ -546,6 +718,16 @@ export async function submitAvailability(raw: unknown) {
         supplierRequestId: request.id,
         submittedCount,
         requestStatus: nextRequestStatus,
+        availabilityByDate: parsed.data.lines.flatMap((line) => {
+          const prior = readAvailabilitySplits(itemById.get(line.requestItemId)?.availabilityOffer?.availableSplits);
+          if (!prior.length && !line.splits?.length) return [];
+          if (parseQty(line) == null) return [];
+          return [{
+            requestItemId: line.requestItemId,
+            before: prior,
+            after: line.splits ?? [],
+          }];
+        }),
       },
     });
 
@@ -608,29 +790,126 @@ export async function expireOfferIfNeeded(offerId: string, supplierId: string) {
 
 export async function getSupplierRequestForSupplier(supplierRequestId: string) {
   const user = await requireSupplier();
-  const request = await loadOwnedRequest(supplierRequestId, user.supplierId!);
+  const supplierId = user.supplierId!;
+  const request = await loadOwnedRequest(supplierRequestId, supplierId);
+  const candidateIds = request.items.filter(({ product, availabilityOffer }) =>
+    product.unitOfMeasure?.trim() &&
+    (!availabilityOffer || (availabilityOffer.status === "DRAFT" &&
+      availabilityOffer.unitPrice === null && !availabilityOffer.priceAgreement)),
+  ).map(({ product }) => product.id);
+  const savedRows = await loadSavedRequestPrices({
+    companyId: user.companyId,
+    supplierId,
+  }, [...new Set(candidateIds)]).catch(() => []);
+  const savedPrices = new Map(savedRows.map((price) => [price.productId, price]));
+
+  const counterProductIds = request.items
+    .filter(
+      (item) =>
+        item.availabilityOffer?.priceAgreement?.status === "COUNTER_PENDING" &&
+        item.availabilityOffer.priceAgreement.currentQuote?.kind ===
+          "COMPANY_COUNTER",
+    )
+    .map((item) => item.product.id);
+
+  const lastPurchases = await loadLastPurchasesForSupplierProducts({
+    companyId: user.companyId,
+    supplierId,
+    productIds: counterProductIds,
+  });
 
   const items = [];
   for (const item of request.items) {
+    const agreement = item.availabilityOffer?.priceAgreement ?? null;
     let offer = item.availabilityOffer;
     if (offer) {
-      offer = await expireOfferIfNeeded(offer.id, user.supplierId!);
+      const expired = await expireOfferIfNeeded(offer.id, supplierId);
+      offer = expired
+        ? {
+            ...offer,
+            status: expired.status,
+            version: expired.version,
+            reservedAt: expired.reservedAt,
+            reserveExpiresAt: expired.reserveExpiresAt,
+            quantityDeclared: expired.quantityDeclared,
+            quantityOrderedActive: expired.quantityOrderedActive,
+            unitPrice: expired.unitPrice,
+            availableDate: expired.availableDate,
+            notes: expired.notes,
+          }
+        : offer;
     }
+
+    let negotiation: CounterNegotiationDisplay | null = null;
+    let supplierQuotedUnitPrice: string | null = null;
+
+    if (
+      agreement?.status === "COUNTER_PENDING" &&
+      agreement.currentQuote?.kind === "COMPANY_COUNTER"
+    ) {
+      const current = agreement.currentQuote;
+      const excludeQuoteIds = [
+        current.id,
+        current.supersedesQuote?.id,
+      ].filter((id): id is string => Boolean(id));
+
+      const previousQuoted = await loadPreviousSupplierQuotedPrice({
+        companyId: user.companyId,
+        supplierId,
+        productId: item.product.id,
+        excludeQuoteIds,
+        excludeOfferId: offer?.id ?? null,
+      });
+
+      negotiation = buildCounterNegotiationDisplay({
+        currentQuote: current,
+        currencyCodeFallback: agreement.currencyCode,
+        lastPurchase: lastPurchases.get(item.product.id) ?? null,
+        previousQuotedPrice: previousQuoted,
+      });
+      supplierQuotedUnitPrice =
+        negotiation.currentSupplierQuote?.unitPrice ?? null;
+    } else if (agreement && agreement.currentQuote?.kind !== "COMPANY_COUNTER") {
+      supplierQuotedUnitPrice = agreement.unitPrice.toString();
+    } else if (offer?.unitPrice != null) {
+      supplierQuotedUnitPrice = offer.unitPrice.toString();
+    }
+
+    const savedCataloguePrice = compatibleCataloguePrice(savedPrices.get(item.product.id), item.product.unitOfMeasure);
     items.push({
       id: item.id,
       quantityRequested: item.quantityRequested.toString(),
       product: item.product,
+      savedCataloguePrice,
       offer: offer
         ? {
             id: offer.id,
             status: offer.status,
             quantityDeclared: offer.quantityDeclared.toString(),
             quantityOrderedActive: offer.quantityOrderedActive.toString(),
+            /** Live offer pointer — may equal company counter while COUNTER_PENDING. */
+            unitPrice: offer.unitPrice?.toString() ?? null,
+            /**
+             * Supplier's own current quote for editable fields.
+             * Never the unaccepted company counter while COUNTER_PENDING.
+             */
+            supplierQuotedUnitPrice,
             availableDate: offer.availableDate,
+            splits: readAvailabilitySplits(offer.availableSplits),
             reservedAt: offer.reservedAt,
             reserveExpiresAt: offer.reserveExpiresAt,
             notes: offer.notes,
             version: offer.version,
+            priceAgreement: agreement
+              ? {
+                  status: agreement.status,
+                  version: agreement.version,
+                  unitPrice: agreement.unitPrice.toString(),
+                  channel: agreement.channel,
+                  currentQuoteKind: agreement.currentQuote?.kind ?? null,
+                }
+              : null,
+            negotiation,
           }
         : null,
     });
@@ -642,6 +921,7 @@ export async function getSupplierRequestForSupplier(supplierRequestId: string) {
     responseDeadline: request.responseDeadline,
     sentAt: request.sentAt,
     brandId: request.brandId,
+    brand: request.brand,
     items,
   };
 }

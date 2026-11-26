@@ -26,9 +26,15 @@ export async function listBrandsForCompany() {
   return brandsForCompanyId(user.companyId);
 }
 
-/** Brands for requirement draft work (MANAGE_REQUIREMENTS / ADMIN). */
+/**
+ * Brands for requirement UI filters / draft forms.
+ * Uses the same read ACL as requirement list (MANAGE / CONFIRM / SEND / ADMIN).
+ */
 export async function listBrandsForRequirements() {
-  const user = await requireStaffPermission("MANAGE_REQUIREMENTS");
+  const { requireRequirementReadAccess } = await import(
+    "@/lib/requirements/access"
+  );
+  const user = await requireRequirementReadAccess();
   return brandsForCompanyId(user.companyId);
 }
 

@@ -7,6 +7,7 @@ import {
   assertAuthenticatedUser,
   assertCanManageStaffPermissions,
   assertStaffPermission,
+  assertStaffPermissions,
   assertSupplierAccountActive,
   assertSupplierOwnership,
   assertSupplierUser,
@@ -108,6 +109,44 @@ describe("assertStaffPermission", () => {
         manageSuppliers,
       ),
     ).toThrow(AuthorizationError);
+  });
+});
+
+describe("assertStaffPermissions (AND)", () => {
+  it("requires every listed permission for STAFF", () => {
+    expect(() =>
+      assertStaffPermissions(
+        user({ role: "STAFF" }),
+        new Set<StaffPermissionCode>(["VERIFY_DELIVERY"]),
+        ["VERIFY_DELIVERY", "ISSUE_GRN"],
+      ),
+    ).toThrow(AuthorizationError);
+
+    expect(() =>
+      assertStaffPermissions(
+        user({ role: "STAFF" }),
+        new Set<StaffPermissionCode>(["ISSUE_GRN"]),
+        ["VERIFY_DELIVERY", "ISSUE_GRN"],
+      ),
+    ).toThrow(AuthorizationError);
+
+    expect(() =>
+      assertStaffPermissions(
+        user({ role: "STAFF" }),
+        new Set<StaffPermissionCode>(["VERIFY_DELIVERY", "ISSUE_GRN"]),
+        ["VERIFY_DELIVERY", "ISSUE_GRN"],
+      ),
+    ).not.toThrow();
+  });
+
+  it("allows ADMIN to bypass both permissions", () => {
+    expect(() =>
+      assertStaffPermissions(
+        user({ role: "ADMIN" }),
+        new Set(),
+        ["VERIFY_DELIVERY", "ISSUE_GRN"],
+      ),
+    ).not.toThrow();
   });
 });
 

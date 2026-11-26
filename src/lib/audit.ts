@@ -4,10 +4,21 @@ import type { Prisma } from "@/generated/prisma/client";
 
 import { prisma } from "@/lib/db";
 
-export type AuditEntityType = "Supplier" | "Product" | "Requirement" | "Brand";
+export type AuditEntityType =
+  | "Supplier"
+  | "Product"
+  | "Requirement"
+  | "Brand"
+  | "PurchaseOrder"
+  | "SupplierRequest"
+  | "OsfImport"
+  | "Delivery"
+  | "Grn"
+  | "OutboundIntegrationConnection";
 
 type AuditInput = {
-  actorUserId: string;
+  /** Null for server-to-server integration actors (no Portal User). */
+  actorUserId: string | null;
   entityType: AuditEntityType;
   entityId: string;
   action: string;

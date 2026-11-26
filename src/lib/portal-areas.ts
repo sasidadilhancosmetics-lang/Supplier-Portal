@@ -11,7 +11,7 @@ export const portalAreas: readonly PortalArea[] = [
     href: "/admin",
     title: "Admin",
     audience: "Company Admin",
-    summary: "Reserved for supplier setup and the admin overview.",
+    summary: "Supplier activation and company purchasing overview.",
     purpose:
       "Company admins manage suppliers, brands membership, and activation. Access requires a provisioned ADMIN user.",
   },
@@ -20,7 +20,7 @@ export const portalAreas: readonly PortalArea[] = [
     title: "Staff",
     audience: "Company Staff",
     summary:
-      "Products, requirements, and supplier request review for company staff.",
+      "OSF imports, products, requirements, and supplier request workflows.",
     purpose:
       "Company staff manage provisional products, draft/confirm requirements, distribute requests, and review availability. Access requires ADMIN or STAFF; actions use StaffPermission grants (ADMIN bypasses).",
   },
@@ -28,9 +28,9 @@ export const portalAreas: readonly PortalArea[] = [
     href: "/supplier",
     title: "Supplier",
     audience: "Supplier",
-    summary: "Request responses and company profile for suppliers.",
+    summary: "Availability requests, orders, and company profile.",
     purpose:
-      "Suppliers answer availability requests and maintain their company profile. Orders and deliveries come later. Access requires a provisioned SUPPLIER user with supplierId.",
+      "Suppliers answer availability requests, confirm purchase orders, and maintain their company profile. Access requires a provisioned SUPPLIER user with supplierId.",
   },
 ];
 

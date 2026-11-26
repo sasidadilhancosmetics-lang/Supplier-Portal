@@ -3,6 +3,7 @@ export {
   assertAuthenticatedUser,
   assertCanManageStaffPermissions,
   assertStaffPermission,
+  assertStaffPermissions,
   assertSupplierAccountActive,
   assertSupplierOwnership,
   assertSupplierUser,
@@ -10,6 +11,8 @@ export {
 } from "./authorize";
 export { AuthorizationError, isAuthorizationError } from "./errors";
 export {
+  canStaffPermission,
+  canStaffPermissions,
   requireAdmin,
   requireAdminPage,
   requireAuthenticatedUser,
@@ -17,6 +20,7 @@ export {
   requireCanManageStaffPermissions,
   requireStaffAreaPage,
   requireStaffPermission,
+  requireStaffPermissions,
   requireSupplier,
   requireSupplierIdentity,
   requireSupplierIdentityPage,

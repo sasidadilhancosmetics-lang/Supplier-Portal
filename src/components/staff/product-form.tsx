@@ -82,14 +82,13 @@ export function ProductForm({
             </span>
           </p>
           <p className="mt-2 text-muted-foreground">
-            Manual create always produces PROVISIONAL products. ERP identifiers
-            are never invented here.
+            Product identity comes from the Cosmo OSF import. ERP identifiers
+            are not inferred from missing purchase history.
           </p>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">
-          Development products are created as <strong>PROVISIONAL</strong> with
-          no ERP Item ID.
+          Product references arrive from Cosmo OSF imports.
         </p>
       )}
 

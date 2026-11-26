@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils";
 
 type BrandOption = { id: string; name: string };
 
+import { SelectListedBrands } from "@/components/supplier/select-listed-brands";
+
 type SupplierFormValues = {
   name: string;
   contactName?: string | null;
@@ -188,10 +190,9 @@ export function SupplierForm({
             className="mt-1 size-4"
           />
           <span>
-            Supports all brands
+            Receive requests for all brands
             <span className="mt-0.5 block text-muted-foreground">
-              Matches every brand for request distribution. Specific brands may
-              still be listed below.
+              Catalogue access uses the brands selected below.
             </span>
           </span>
         </label>
@@ -202,6 +203,8 @@ export function SupplierForm({
             supplier and assign brands later.
           </p>
         ) : (
+          <div className="space-y-2">
+          <SelectListedBrands />
           <ul className="grid gap-2 sm:grid-cols-2">
             {brands.map((brand) => (
               <li key={brand.id}>
@@ -218,6 +221,7 @@ export function SupplierForm({
               </li>
             ))}
           </ul>
+          </div>
         )}
       </fieldset>
 

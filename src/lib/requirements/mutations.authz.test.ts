@@ -98,6 +98,10 @@ describe("requirement authorization and draft rules", () => {
       status: "DRAFT",
       companyId: "co_1",
       _count: { items: 2 },
+      items: [
+        { id: "i1", productId: "p1", quantityPlanned: 2 },
+        { id: "i2", productId: "p2", quantityPlanned: 1 },
+      ],
     } as never);
     vi.mocked(prisma.requirement.updateMany).mockResolvedValue({ count: 0 });
 
@@ -112,6 +116,7 @@ describe("requirement authorization and draft rules", () => {
       status: "CONFIRMED",
       companyId: "co_1",
       _count: { items: 1 },
+      items: [{ id: "i1", productId: "p1", quantityPlanned: 1 }],
     } as never);
 
     const result = await confirmRequirement({ requirementId: "req_1" });
@@ -125,6 +130,7 @@ describe("requirement authorization and draft rules", () => {
       status: "DRAFT",
       companyId: "co_1",
       _count: { items: 0 },
+      items: [],
     } as never);
 
     await expect(

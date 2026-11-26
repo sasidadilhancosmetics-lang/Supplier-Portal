@@ -119,14 +119,7 @@ async function ProductList({
 
       {result.items.length === 0 ? (
         <div className="rounded-lg border bg-muted px-4 py-6 text-sm">
-          No products match.{" "}
-          <Link
-            href="/staff/products/new"
-            className="underline underline-offset-4"
-          >
-            Create a provisional product
-          </Link>
-          .
+          No products match. Product references arrive through Cosmo OSF imports.
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border">
@@ -231,17 +224,10 @@ export default function ProductsPage({ searchParams }: PageProps) {
         <div className="flex max-w-2xl flex-col gap-2">
           <h1 className="text-3xl font-semibold tracking-tight">Products</h1>
           <p className="text-base leading-7 text-muted-foreground">
-            Product master for development testing. Manual creates are
-            provisional only — ERP-linked products come from future sync, not
-            invented here.
+            Product references arrive from Cosmo OSF imports. Review an import
+            before confirming it for supplier access.
           </p>
         </div>
-        <Link
-          href="/staff/products/new"
-          className={cn(buttonVariants({ className: "min-h-11" }))}
-        >
-          Add provisional product
-        </Link>
       </div>
 
       <Suspense
