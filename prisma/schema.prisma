@@ -59,6 +59,32 @@ enum StaffPermissionCode {
   VIEW_REPORTS
 }
 
+enum PriceNegotiationChannel {
+  PORTAL
+  PHONE
+  WHATSAPP
+}
+
+/// What this append-only quote row represents.
+enum PriceQuoteKind {
+  SUPPLIER_ORIGINAL
+  SUPPLIER_REVISED
+  COMPANY_COUNTER
+  STAFF_RECORDED_EXTERNAL
+  SUPPLIER_ACCEPTANCE
+}
+
+/// Lifecycle of a quote / agreement pointer. Staff-recorded ≠ supplier-confirmed.
+enum PriceAgreementStatus {
+  QUOTED
+  COUNTER_PENDING
+  STAFF_RECORDED_UNCONFIRMED
+  SUPPLIER_CONFIRMED
+  STAFF_ATTESTED_AGREED
+  DECLINED
+  SUPERSEDED
+}
+
 enum ProductPriorityStatus {
   NORMAL
   HIGH
@@ -67,8 +93,40 @@ enum ProductPriorityStatus {
 
 enum OsfImportStatus {
   RECEIVED
+  /// Legacy: read as READY_TO_CONFIRM. Kept for backward compatibility; new writes do not use it.
   PROCESSED
   FAILED
+  NEEDS_REVIEW
+  READY_TO_CONFIRM
+  CONFIRMED
+}
+
+enum OsfImportLineMappingStatus {
+  MATCHED_SKU
+  UNKNOWN_SKU
+  AMBIGUOUS_SKU
+  UNKNOWN_BRAND
+  REJECTED_ZERO_QTY
+  REJECTED_INVALID_QTY
+  EXCLUDED
+}
+
+enum OsfImportDistributionStatus {
+  IN_PROGRESS
+  SUCCEEDED
+  /// Every eligible supplier already had an active request; no new requests were created.
+  SKIPPED_ALREADY_REQUESTED
+  FAILED
+}
+
+/// Cosmo OS allocation suggestion → Portal supplier mapping state (Phase F2).
+enum OsfRequestSuggestionMappingStatus {
+  MATCHED_SUPPLIER
+  UNRESOLVED_SUPPLIER
+  /// Portal supplier resolved but not ACTIVE or not brand-eligible for the line.
+  INELIGIBLE_BRAND
+  /// Line is zero/excluded/unmapped; suggestion preserved but not sendable yet.
+  LINE_NOT_ACTIONABLE
 }
 
 enum RequirementStatus {
@@ -146,12 +204,16 @@ enum ProductMasterStatus {
 }
 
 enum DeliveryStatus {
-  /// Counts against remaining deliverable capacity (holds qty until verified/rejected).
+  /// Legacy: supplier claimed physical delivery (past deliveredAt). Holds capacity until verified/rejected.
   SUBMITTED
+  /// Planned delivery. Holds capacity. Does NOT mean goods were received.
+  SCHEDULED
   /// Accepted quantity; counts toward verified received totals.
   VERIFIED
   /// Does not count toward ordered or verified totals.
   REJECTED
+  /// Prior schedule replaced by a newer schedule. History only; no capacity hold.
+  SUPERSEDED
 }
 
 enum GrnStatus {
@@ -209,6 +271,13 @@ model Company {
   productOffers      ProductOffer[]
   performanceExceptions PerformanceException[]
   supplierInvitations SupplierInvitation[]
+  osfImportLines         OsfImportLine[]
+  osfImportDistributions OsfImportDistribution[]
+  integrationCredentials IntegrationCredential[]
+  outboundIntegrationConnections OutboundIntegrationConnection[]
+  osfRequestSuggestions  OsfRequestSuggestion[]
+  priceQuotes            PriceQuote[]
+  priceAgreements        PriceAgreement[]
 }
 
 model User {
@@ -249,6 +318,15 @@ model User {
   reviewedProductOffers     ProductOffer[]           @relation("ProductOfferReviewedBy")
   performanceExceptionsRequested PerformanceException[] @relation("PerformanceExceptionRequestedBy")
   performanceExceptionsReviewed  PerformanceException[] @relation("PerformanceExceptionReviewedBy")
+
+  osfImportsConfirmed           OsfImport[]             @relation("OsfImportConfirmedBy")
+  osfImportDistributionsClaimed OsfImportDistribution[] @relation("OsfImportDistributionClaimedBy")
+  integrationCredentialsCreated IntegrationCredential[] @relation("IntegrationCredentialCreatedBy")
+  integrationCredentialsRevoked IntegrationCredential[] @relation("IntegrationCredentialRevokedBy")
+  priceQuotesRecorded           PriceQuote[]            @relation("PriceQuoteRecordedBy")
+  priceQuotesAttested           PriceQuote[]            @relation("PriceQuoteAttestedBy")
+  catalogueExclusions SupplierCatalogueSkuExclusion[]
+  cataloguePrices SupplierCataloguePriceRevision[]
 
   @@index([companyId, role])
   @@index([supplierId])
@@ -313,7 +391,7 @@ model Supplier {
   postalCode   String?
   country      String?
   notes        String?
-  /// External id from Cosmo/ERP when known. Contract unresolved.
+  /// Cosmo OS Supplier.id (cuid). Never auto-matched by name.
   externalId   String?
   createdAt    DateTime       @default(now())
   updatedAt    DateTime       @updatedAt
@@ -328,9 +406,16 @@ model Supplier {
   availabilityOffers AvailabilityOffer[]
   purchaseOrders     PurchaseOrder[]
   productOffers      ProductOffer[]
+  osfRequestSuggestions OsfRequestSuggestion[]
+  priceQuotes           PriceQuote[]
+  priceAgreements       PriceAgreement[]
+  catalogueExclusions SupplierCatalogueSkuExclusion[]
+  cataloguePrices SupplierCataloguePriceRevision[]
 
   /// Supports composite FKs that bind child rows to (supplier, company).
   @@unique([id, companyId])
+  /// Company-scoped Cosmo supplier id. Multiple NULLs allowed in PostgreSQL.
+  @@unique([companyId, externalId])
   @@index([companyId, status])
   @@index([companyId, registrationSource, status])
   @@index([companyId, supportsAllBrands])
@@ -382,6 +467,7 @@ model Brand {
   suppliers        SupplierBrand[]
   requirements     Requirement[]
   supplierRequests SupplierRequest[]
+  osfImportLines   OsfImportLine[]
 
   @@unique([companyId, name])
 }
@@ -431,7 +517,14 @@ model Product {
   requestItems      RequestItem[]
   orderItems        OrderItem[]
   productOfferItems ProductOfferItem[]
+  osfImportLines    OsfImportLine[]
+  priceQuotes       PriceQuote[]
+  priceAgreements   PriceAgreement[]
+  catalogueExclusions SupplierCatalogueSkuExclusion[]
+  cataloguePrices SupplierCataloguePriceRevision[]
+  catalogueMedia ProductCatalogueMedia?
 
+  @@unique([id, companyId])
   @@unique([companyId, erpItemId])
   @@index([companyId, brandId])
   @@index([companyId, cosmoItemId])
@@ -448,20 +541,283 @@ model OsfImport {
   companyId      String
   externalId     String?
   idempotencyKey String
+  /// SHA-256 hex of the canonical ingest payload. Same key + different hash = conflict.
+  payloadHash    String
+  /// Integration contract version, e.g. "cosmo-osf-push.v1".
+  contractVersion String?
+  /// Credential that pushed this import (null for imports created before Phase B).
+  integrationCredentialId String?
   status         OsfImportStatus @default(RECEIVED)
   payload        Json
   errorMessage   String?
+  /// Optimistic concurrency for review edits and batch confirmation.
+  version        Int             @default(1)
   receivedAt     DateTime        @default(now())
   processedAt    DateTime?
+  confirmedAt    DateTime?
+  confirmedById  String?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
-  requirements Requirement[]
+  company               Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  integrationCredential IntegrationCredential?  @relation(fields: [integrationCredentialId], references: [id], onDelete: Restrict)
+  confirmedBy           User?                   @relation("OsfImportConfirmedBy", fields: [confirmedById], references: [id], onDelete: Restrict)
+  requirements          Requirement[]
+  lines                 OsfImportLine[]
+  distributions         OsfImportDistribution[]
+  requestSuggestions    OsfRequestSuggestion[]
 
   @@unique([companyId, idempotencyKey])
+  /// Composite target so child rows cannot reference another company's import.
+  @@unique([id, companyId])
   @@index([companyId, status])
+  @@index([companyId, status, confirmedAt(sort: Desc), id(sort: Desc)], map: "OsfImport_catalogue_latest_idx")
   @@index([externalId])
+  @@index([integrationCredentialId])
+}
+
+model SupplierCatalogueSkuExclusion {
+  companyId String
+  supplierId String
+  productId String
+  createdByUserId String
+  createdAt DateTime @default(now())
+
+  supplier Supplier @relation(fields: [supplierId, companyId], references: [id, companyId], onDelete: Restrict)
+  product Product @relation(fields: [productId, companyId], references: [id, companyId], onDelete: Restrict)
+  createdBy User @relation(fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@id([companyId, supplierId, productId])
+}
+
+model SupplierCataloguePriceRevision {
+  id String @id @default(cuid())
+  companyId String
+  supplierId String
+  productId String
+  revision Int
+  unitPrice Decimal @db.Decimal(18, 2)
+  currencyCode String @default("LKR")
+  unitOfMeasure String?
+  moq Decimal? @db.Decimal(18, 4)
+  actorUserId String
+  createdAt DateTime @default(now())
+  idempotencyKey String
+  payloadHash String
+
+  supplier Supplier @relation(fields: [supplierId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  product Product @relation(fields: [productId, companyId], references: [id, companyId], onDelete: Restrict, onUpdate: Restrict)
+  actor User @relation(fields: [actorUserId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([companyId, supplierId, productId, revision], map: "CataloguePriceRevision_stream_key")
+  @@unique([companyId, supplierId, productId, idempotencyKey], map: "CataloguePriceRevision_idempotency_key")
+}
+
+enum CatalogueMediaStatus {
+  UNMAPPED
+  APPROVED
+  NEEDS_REVIEW
+  UNAVAILABLE
+}
+
+model ProductCatalogueMedia {
+  companyId String
+  productId String
+  sourceCompanyId String
+  sourceLocationId String
+  storeHostname String
+  cosmoProductItemId String?
+  shopifyProductId String?
+  shopifyVariantId String?
+  mappedSku String
+  imageUrl String?
+  imageAlt String?
+  status CatalogueMediaStatus @default(UNMAPPED)
+  sourceUpdatedAt DateTime?
+  lastSuccessfulRefreshAt DateTime?
+  refreshVersion Int @default(1)
+  refreshFailedAt DateTime?
+  reviewedAt DateTime?
+
+  product Product @relation(fields: [productId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@id([companyId, productId])
+  @@unique([productId, companyId])
+}
+
+/// One row per inbound import line, matched or not. Never silently dropped.
+model OsfImportLine {
+  id                  String                     @id @default(cuid())
+  companyId           String
+  osfImportId         String
+  /// Zero-based position in the inbound payload items array.
+  sourceIndex         Int
+  /// Stable within the import (Cosmo lineKey, typically the SKU).
+  lineKey             String
+  sku                 String
+  descriptionSnapshot String
+  cosmoVendorId       String?
+  brandNameSnapshot   String
+  erp1Priority        String?
+  erp2Priority        String?
+  /// Quantity proposed by Cosmo (TOTAL ORDER QTY at send time). Never edited.
+  quantityProposed    Decimal                    @db.Decimal(18, 4)
+  /// Current staff-reviewed quantity; mirrors RequirementItem.quantityPlanned when linked.
+  quantityPlanned     Decimal                    @db.Decimal(18, 4)
+  mappingStatus       OsfImportLineMappingStatus
+  brandId             String?
+  productId           String?
+  requirementId       String?
+  requirementItemId   String?                    @unique
+  resolutionNote      String?
+  version             Int                        @default(1)
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  company         Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  osfImport       OsfImport        @relation(fields: [osfImportId, companyId], references: [id, companyId], onDelete: Restrict)
+  brand           Brand?           @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  product         Product?         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  requirement     Requirement?     @relation(fields: [requirementId], references: [id], onDelete: Restrict)
+  requirementItem RequirementItem? @relation(fields: [requirementItemId], references: [id], onDelete: Restrict)
+  requestSuggestions OsfRequestSuggestion[]
+
+  @@unique([osfImportId, lineKey])
+  @@unique([osfImportId, sourceIndex])
+  @@unique([id, companyId])
+  @@unique([id, osfImportId, companyId])
+  @@unique([id, osfImportId, companyId, lineKey])
+  @@index([companyId, osfImportId])
+  @@index([osfImportId, mappingStatus])
+  @@index([osfImportId, brandId])
+  @@index([requirementId])
+  @@index([productId])
+}
+
+/// Cosmo allocation suggestion for an import line (availability-request advice only).
+model OsfRequestSuggestion {
+  id                  String                           @id @default(cuid())
+  companyId           String
+  osfImportId         String
+  osfImportLineId     String
+  /// Must match OsfImportLine.lineKey for osfImportLineId (quad FK).
+  lineKey             String
+  cosmoSupplierId     String
+  cosmoSupplierCode   String?
+  cosmoSupplierName   String
+  suggestedRequestQty Decimal                          @db.Decimal(18, 4)
+  /// Set for MATCHED_SUPPLIER and INELIGIBLE_BRAND; null for UNRESOLVED_SUPPLIER.
+  supplierId          String?
+  mappingStatus       OsfRequestSuggestionMappingStatus
+  sourceSnapshot      Json
+  /// Soft flags e.g. { "overLineQty": true }.
+  warningFlags        Json?
+  createdAt           DateTime                         @default(now())
+  updatedAt           DateTime                         @updatedAt
+
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  osfImport     OsfImport     @relation(fields: [osfImportId, companyId], references: [id, companyId], onDelete: Restrict)
+  osfImportLine OsfImportLine @relation(fields: [osfImportLineId, osfImportId, companyId, lineKey], references: [id, osfImportId, companyId, lineKey], onDelete: Restrict)
+  supplier      Supplier?     @relation(fields: [supplierId, companyId], references: [id, companyId], onDelete: Restrict)
+
+  @@unique([osfImportId, osfImportLineId, cosmoSupplierId])
+  @@index([companyId, osfImportId])
+  @@index([osfImportId, mappingStatus])
+  @@index([supplierId])
+  @@index([lineKey])
+}
+
+/// Per-requirement distribution ledger for an import. SUCCEEDED and
+/// SKIPPED_ALREADY_REQUESTED rows are never re-sent by the import retry path.
+model OsfImportDistribution {
+  id             String                      @id @default(cuid())
+  companyId      String
+  osfImportId    String
+  requirementId  String
+  status         OsfImportDistributionStatus
+  /// Random token identifying the current claim holder while IN_PROGRESS.
+  claimToken     String?
+  claimedById    String?
+  claimedAt      DateTime?
+  /// IN_PROGRESS claims past this time may be reclaimed.
+  claimExpiresAt DateTime?
+  attemptCount   Int                         @default(0)
+  /// SupplierRequest ids created by the successful attempt.
+  supplierRequestIds Json?
+  /// Supplier ids that already had an active request (SKIPPED_ALREADY_REQUESTED outcome).
+  alreadyRequestedSupplierIds Json?
+  lastError      String?
+  /// Set when the row reaches SUCCEEDED or SKIPPED_ALREADY_REQUESTED.
+  completedAt    DateTime?
+  version        Int                         @default(1)
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  osfImport   OsfImport   @relation(fields: [osfImportId, companyId], references: [id, companyId], onDelete: Restrict)
+  requirement Requirement @relation(fields: [requirementId, companyId], references: [id, companyId], onDelete: Restrict)
+  claimedBy   User?       @relation("OsfImportDistributionClaimedBy", fields: [claimedById], references: [id], onDelete: Restrict)
+
+  @@unique([osfImportId, requirementId])
+  @@index([companyId, status])
+  @@index([osfImportId, status])
+  @@index([requirementId])
+  @@index([status, claimExpiresAt])
+}
+
+/// Server-to-server credential bound to one Portal company and one Cosmo tenant.
+/// Multiple active rows per binding are allowed for zero-downtime token rotation.
+model IntegrationCredential {
+  id             String    @id @default(cuid())
+  companyId      String
+  /// Cosmo tenant id this credential may act for. Inbound cosmoCompanyId must match.
+  cosmoCompanyId String
+  name           String
+  /// SHA-256 hex of the bearer token. Plain token is never stored.
+  tokenHash      String    @unique
+  /// Non-secret prefix shown to staff for identification.
+  tokenPrefix    String
+  isActive       Boolean   @default(true)
+  expiresAt      DateTime?
+  lastUsedAt     DateTime?
+  revokedAt      DateTime?
+  revokedById    String?
+  createdById    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  company   Company     @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  createdBy User?       @relation("IntegrationCredentialCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  revokedBy User?       @relation("IntegrationCredentialRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict)
+  osfImports OsfImport[]
+
+  @@index([companyId, cosmoCompanyId, isActive])
+}
+
+enum OutboundIntegrationProvider {
+  ERP_NEXT
+  SHOPIFY
+}
+
+model OutboundIntegrationConnection {
+  id                    String                      @id @default(cuid())
+  companyId             String
+  provider              OutboundIntegrationProvider
+  label                 String
+  origin                String
+  enabled               Boolean                     @default(false)
+  configVersion         Int                         @default(1)
+  credentialCiphertext  Bytes?
+  credentialNonce       Bytes?
+  credentialTag         Bytes?
+  credentialKeyId       String?
+  credentialRotatedAt   DateTime?
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: Restrict)
+
+  @@unique([companyId, provider, origin], map: "OutboundIntegrationConnection_companyId_provider_origin_key")
 }
 
 model Requirement {
@@ -483,9 +839,15 @@ model Requirement {
   brand       Brand      @relation(fields: [brandId], references: [id], onDelete: Restrict)
   confirmedBy User?      @relation("RequirementConfirmedBy", fields: [confirmedById], references: [id], onDelete: Restrict)
 
-  items            RequirementItem[]
-  supplierRequests SupplierRequest[]
+  items                  RequirementItem[]
+  supplierRequests       SupplierRequest[]
+  osfImportLines         OsfImportLine[]
+  osfImportDistributions OsfImportDistribution[]
 
+  /// One brand-scoped draft per import. NULL osfImportId (manual) rows are not constrained.
+  @@unique([osfImportId, brandId])
+  /// Composite target for company-safe child FKs.
+  @@unique([id, companyId])
   @@index([companyId, status])
   @@index([brandId, status])
   @@index([osfImportId])
@@ -505,7 +867,8 @@ model RequirementItem {
   requirement Requirement @relation(fields: [requirementId], references: [id], onDelete: Restrict)
   product     Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
 
-  requestItems RequestItem[]
+  requestItems  RequestItem[]
+  osfImportLine OsfImportLine?
 
   @@index([requirementId])
   @@index([productId])
@@ -537,7 +900,8 @@ model SupplierRequest {
   supplier    Supplier    @relation(fields: [supplierId, companyId], references: [id, companyId], onDelete: Restrict)
   brand       Brand       @relation(fields: [brandId], references: [id], onDelete: Restrict)
 
-  items RequestItem[]
+  items       RequestItem[]
+  priceQuotes PriceQuote[]
 
   @@unique([id, supplierId])
   @@unique([id, companyId])
@@ -566,6 +930,8 @@ model RequestItem {
   product         Product          @relation(fields: [productId], references: [id], onDelete: Restrict)
 
   availabilityOffer AvailabilityOffer?
+  priceQuotes       PriceQuote[]
+  priceAgreements   PriceAgreement[]
 
   @@unique([id, supplierId])
   @@index([supplierRequestId])
@@ -596,6 +962,7 @@ model AvailabilityOffer {
   unitPrice             Decimal?                @db.Decimal(18, 2)
   currencyCode          String?
   availableDate         DateTime?
+  availableSplits       Json?
   /// Set only on positive SUBMITTED. Null for DRAFT / NOT_AVAILABLE / unanswered.
   reservedAt            DateTime?
   /// reservedAt + 7*24h (UTC). Must not move while SUBMITTED (incl. partial orders).
@@ -612,13 +979,104 @@ model AvailabilityOffer {
   requestItem RequestItem @relation(fields: [requestItemId, supplierId], references: [id, supplierId], onDelete: Restrict)
   supplier    Supplier    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
 
-  changes    AvailabilityChange[]
-  orderItems OrderItem[]
+  changes         AvailabilityChange[]
+  orderItems      OrderItem[]
+  priceQuotes     PriceQuote[]
+  priceAgreement  PriceAgreement?
 
   @@unique([requestItemId, supplierId])
   @@unique([id, supplierId])
   @@index([supplierId, status])
   @@index([reserveExpiresAt, status])
+}
+
+/// Append-only price history. Never UPDATE unitPrice; supersede instead.
+model PriceQuote {
+  id                    String                   @id @default(cuid())
+  companyId             String
+  supplierId            String
+  productId             String
+  /// Optional binding to the live availability offer under negotiation.
+  availabilityOfferId   String?
+  requestItemId         String?
+  supplierRequestId     String?
+  channel               PriceNegotiationChannel
+  kind                  PriceQuoteKind
+  /// Status claimed by this event (historical). SUPERSEDED when replaced.
+  status                PriceAgreementStatus
+  unitPrice             Decimal                  @db.Decimal(18, 2)
+  currencyCode          String?
+  /// Optional qty context for the quote (does not change offer declared qty).
+  quantityContext       Decimal?                 @db.Decimal(18, 4)
+  availableDate         DateTime?
+  notes                 String?
+  /// Phone/WhatsApp negotiation date (calendar); null for pure portal events.
+  negotiationOccurredAt DateTime?
+  /// Required when status becomes STAFF_ATTESTED_AGREED.
+  attestationStatement  String?
+  evidenceNote          String?
+  attestedAt            DateTime?
+  attestedByUserId      String?
+  recordedByUserId      String?
+  /// Prior quote in the same thread (if any).
+  supersedesQuoteId     String?
+  createdAt             DateTime                 @default(now())
+
+  company           Company            @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  supplier          Supplier           @relation(fields: [supplierId, companyId], references: [id, companyId], onDelete: Restrict)
+  product           Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  availabilityOffer AvailabilityOffer? @relation(fields: [availabilityOfferId, supplierId], references: [id, supplierId], onDelete: Restrict)
+  requestItem       RequestItem?       @relation(fields: [requestItemId, supplierId], references: [id, supplierId], onDelete: Restrict)
+  supplierRequest   SupplierRequest?   @relation(fields: [supplierRequestId, supplierId, companyId], references: [id, supplierId, companyId], onDelete: Restrict)
+  recordedBy        User?              @relation("PriceQuoteRecordedBy", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+  attestedBy        User?              @relation("PriceQuoteAttestedBy", fields: [attestedByUserId], references: [id], onDelete: Restrict)
+  supersedesQuote   PriceQuote?        @relation("PriceQuoteSupersedes", fields: [supersedesQuoteId], references: [id], onDelete: Restrict)
+  supersededBy      PriceQuote[]       @relation("PriceQuoteSupersedes")
+
+  agreementsAsCurrent PriceAgreement[] @relation("PriceAgreementCurrentQuote")
+  orderItems          OrderItem[]
+
+  /// Supports PriceAgreement composite FK (currentQuoteId, availabilityOfferId).
+  @@unique([id, availabilityOfferId])
+  @@index([companyId, productId, createdAt])
+  @@index([companyId, supplierId, productId, createdAt])
+  @@index([availabilityOfferId, createdAt])
+  @@index([supplierRequestId])
+  @@index([requestItemId])
+  @@index([supersedesQuoteId])
+}
+
+/// Mutable pointer to the current commercial agreement for an offer/SKU pair.
+/// unitPrice is denormalized from currentQuote and must match it.
+model PriceAgreement {
+  id                  String                  @id @default(cuid())
+  companyId           String
+  supplierId          String
+  productId           String
+  /// Required: one agreement pointer per AvailabilityOffer.
+  availabilityOfferId String
+  requestItemId       String?
+  status              PriceAgreementStatus
+  currentQuoteId      String
+  unitPrice           Decimal                 @db.Decimal(18, 2)
+  currencyCode        String?
+  channel             PriceNegotiationChannel
+  version             Int                     @default(1)
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  company           Company           @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  supplier          Supplier          @relation(fields: [supplierId, companyId], references: [id, companyId], onDelete: Restrict)
+  product           Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  /// DB also enforces (availabilityOfferId, supplierId) → AvailabilityOffer; Prisma 1:1 uses offer id unique.
+  availabilityOffer AvailabilityOffer @relation(fields: [availabilityOfferId], references: [id], onDelete: Restrict)
+  requestItem       RequestItem?      @relation(fields: [requestItemId, supplierId], references: [id, supplierId], onDelete: Restrict)
+  currentQuote      PriceQuote        @relation("PriceAgreementCurrentQuote", fields: [currentQuoteId, availabilityOfferId], references: [id, availabilityOfferId], onDelete: Restrict)
+
+  @@unique([availabilityOfferId])
+  @@index([companyId, productId, status])
+  @@index([supplierId, status])
+  @@index([currentQuoteId])
 }
 
 /// Append-only history. Never cascade-delete with business cleanup shortcuts.
@@ -654,6 +1112,7 @@ model AvailabilityChange {
 
 model PurchaseOrder {
   id                         String              @id @default(cuid())
+  requiresScheduleApproval   Boolean             @default(false)
   companyId                  String
   supplierId                 String
   productOfferId             String?
@@ -703,6 +1162,10 @@ model OrderItem {
   /// Denormalized sum of VERIFIED DeliveryItem qty for this line. GRN snapshots preserved separately.
   quantityVerifiedReceived   Decimal         @default(0) @db.Decimal(18, 4)
   unitPrice                  Decimal?        @db.Decimal(18, 2)
+  /// Quote used as the agreed unit price at allocation time (nullable for legacy lines).
+  priceQuoteId               String?
+  /// Agreement status snapshot at allocation (immutable after create).
+  priceAgreementStatusAtOrder PriceAgreementStatus?
   /// Preserve for scoring; do not overwrite when delays occur.
   originalExpectedDeliveryAt DateTime?
   cancelledAt                DateTime?
@@ -714,6 +1177,7 @@ model OrderItem {
   availabilityOffer AvailabilityOffer? @relation(fields: [availabilityOfferId, supplierId], references: [id, supplierId], onDelete: Restrict)
   productOfferItem  ProductOfferItem?  @relation(fields: [productOfferItemId, supplierId], references: [id, supplierId], onDelete: Restrict)
   product           Product            @relation(fields: [productId], references: [id], onDelete: Restrict)
+  priceQuote        PriceQuote?        @relation(fields: [priceQuoteId], references: [id], onDelete: Restrict)
 
   deliveryItems         DeliveryItem[]
   performanceExceptions PerformanceException[]
@@ -724,32 +1188,49 @@ model OrderItem {
   @@index([availabilityOfferId, status])
   @@index([productOfferItemId])
   @@index([productId])
+  @@index([priceQuoteId])
 }
 
 model Delivery {
-  id              String         @id @default(cuid())
-  purchaseOrderId String
-  companyId       String
-  supplierId      String
-  status          DeliveryStatus @default(SUBMITTED)
-  idempotencyKey  String?
-  deliveredAt     DateTime?
-  notes           String?
-  verifiedAt      DateTime?
-  verifiedById    String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id                   String         @id @default(cuid())
+  purchaseOrderId      String
+  companyId            String
+  supplierId           String
+  status               DeliveryStatus @default(SUBMITTED)
+  idempotencyKey       String?
+  /// Legacy physical delivery date (SUBMITTED). Prefer plannedDeliveryAt for SCHEDULED.
+  deliveredAt          DateTime?
+  /// Planned calendar delivery date for SCHEDULED (future allowed in app).
+  plannedDeliveryAt    DateTime?
+  scheduleApprovedAt   DateTime?
+  /// Actual company receipt date (today/past Asia/Colombo). Set on verify.
+  receivedAt           DateTime?
+  notes                String?
+  /// Required when this row supersedes a prior SCHEDULED delivery.
+  rescheduleReason     String?
+  supersedesDeliveryId String?
+  verifiedAt           DateTime?
+  verifiedById         String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
   purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId, supplierId, companyId], references: [id, supplierId, companyId], onDelete: Restrict)
   verifiedBy    User?         @relation("DeliveryVerifiedBy", fields: [verifiedById], references: [id], onDelete: Restrict)
+  /// Same-PO lineage: composite FK ties supersede target to this row's purchaseOrderId.
+  supersedes    Delivery?     @relation("DeliveryReschedule", fields: [supersedesDeliveryId, purchaseOrderId], references: [id, purchaseOrderId], onDelete: Restrict)
+  supersededBy  Delivery[]    @relation("DeliveryReschedule")
 
   items DeliveryItem[]
   grn   Grn?
 
   @@unique([purchaseOrderId, idempotencyKey])
+  @@unique([id, purchaseOrderId])
   @@index([purchaseOrderId, status])
   @@index([supplierId, status])
   @@index([companyId])
+  @@index([companyId, status, plannedDeliveryAt])
+  @@index([supplierId, status, plannedDeliveryAt])
+  @@index([supersedesDeliveryId])
 }
 
 model DeliveryItem {
