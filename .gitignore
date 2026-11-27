@@ -50,3 +50,22 @@ next-env.d.ts
 # prisma generated client (created in a later stage)
 /src/generated/prisma
 .neon
+
+# Local rehearsal artifacts (preserved on disk; excluded from releases)
+/prisma/proposed/
+/scripts/debug-requirements-list.ts
+/scripts/list-open-pos-readonly.ts
+/scripts/osf-import-inventory-readonly.ts
+/scripts/phase-b-db-safety-readonly.ts
+/scripts/phase-c-ingest-cleanup-readonly.ts
+/scripts/phase-d1-uat-fixture.ts
+/scripts/prepare-logo-assets.py
+/scripts/verify-po-6a2-readonly.ts
+/scripts/verify-po-6a3-readonly.ts
+/scripts/verify-po-readonly.ts
+/tmp-f2-dev-apply/
+/tmp-f2-rehearsal/
+/tmp-phase-b-preflight-readonly.ts
+/tmp-phase-b/
+/tmp-price-negotiation-rehearsal/
+/tmp-rehearsal-phase-b/
