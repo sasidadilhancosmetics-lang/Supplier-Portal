@@ -1,0 +1,253 @@
+﻿diff --git a/prisma/schema.prisma b/prisma/proposed/phase-b/schema.prisma
+index 2bca9e5..3a60c91 100644
+--- a/prisma/schema.prisma
++++ b/prisma/proposed/phase-b/schema.prisma
+@@ -67,8 +67,30 @@ enum ProductPriorityStatus {
+ 
+ enum OsfImportStatus {
+   RECEIVED
++  /// Legacy: read as READY_TO_CONFIRM. Kept for backward compatibility; new writes do not use it.
+   PROCESSED
+   FAILED
++  NEEDS_REVIEW
++  READY_TO_CONFIRM
++  CONFIRMED
++}
++
++enum OsfImportLineMappingStatus {
++  MATCHED_SKU
++  UNKNOWN_SKU
++  AMBIGUOUS_SKU
++  UNKNOWN_BRAND
++  REJECTED_ZERO_QTY
++  REJECTED_INVALID_QTY
++  EXCLUDED
++}
++
++enum OsfImportDistributionStatus {
++  IN_PROGRESS
++  SUCCEEDED
++  /// Every eligible supplier already had an active request; no new requests were created.
++  SKIPPED_ALREADY_REQUESTED
++  FAILED
+ }
+ 
+ enum RequirementStatus {
+@@ -209,6 +231,9 @@ model Company {
+   productOffers      ProductOffer[]
+   performanceExceptions PerformanceException[]
+   supplierInvitations SupplierInvitation[]
++  osfImportLines         OsfImportLine[]
++  osfImportDistributions OsfImportDistribution[]
++  integrationCredentials IntegrationCredential[]
+ }
+ 
+ model User {
+@@ -250,6 +275,11 @@ model User {
+   performanceExceptionsRequested PerformanceException[] @relation("PerformanceExceptionRequestedBy")
+   performanceExceptionsReviewed  PerformanceException[] @relation("PerformanceExceptionReviewedBy")
+ 
++  osfImportsConfirmed           OsfImport[]             @relation("OsfImportConfirmedBy")
++  osfImportDistributionsClaimed OsfImportDistribution[] @relation("OsfImportDistributionClaimedBy")
++  integrationCredentialsCreated IntegrationCredential[] @relation("IntegrationCredentialCreatedBy")
++  integrationCredentialsRevoked IntegrationCredential[] @relation("IntegrationCredentialRevokedBy")
++
+   @@index([companyId, role])
+   @@index([supplierId])
+ }
+@@ -382,6 +412,7 @@ model Brand {
+   suppliers        SupplierBrand[]
+   requirements     Requirement[]
+   supplierRequests SupplierRequest[]
++  osfImportLines   OsfImportLine[]
+ 
+   @@unique([companyId, name])
+ }
+@@ -431,6 +462,7 @@ model Product {
+   requestItems      RequestItem[]
+   orderItems        OrderItem[]
+   productOfferItems ProductOfferItem[]
++  osfImportLines    OsfImportLine[]
+ 
+   @@unique([companyId, erpItemId])
+   @@index([companyId, brandId])
+@@ -448,20 +480,149 @@ model OsfImport {
+   companyId      String
+   externalId     String?
+   idempotencyKey String
++  /// SHA-256 hex of the canonical ingest payload. Same key + different hash = conflict.
++  payloadHash    String
++  /// Integration contract version, e.g. "cosmo-osf-push.v1".
++  contractVersion String?
++  /// Credential that pushed this import (null for imports created before Phase B).
++  integrationCredentialId String?
+   status         OsfImportStatus @default(RECEIVED)
+   payload        Json
+   errorMessage   String?
++  /// Optimistic concurrency for review edits and batch confirmation.
++  version        Int             @default(1)
+   receivedAt     DateTime        @default(now())
+   processedAt    DateTime?
++  confirmedAt    DateTime?
++  confirmedById  String?
+   createdAt      DateTime        @default(now())
+   updatedAt      DateTime        @updatedAt
+ 
+-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Restrict)
+-  requirements Requirement[]
++  company               Company                 @relation(fields: [companyId], references: [id], onDelete: Restrict)
++  integrationCredential IntegrationCredential?  @relation(fields: [integrationCredentialId], references: [id], onDelete: Restrict)
++  confirmedBy           User?                   @relation("OsfImportConfirmedBy", fields: [confirmedById], references: [id], onDelete: Restrict)
++  requirements          Requirement[]
++  lines                 OsfImportLine[]
++  distributions         OsfImportDistribution[]
+ 
+   @@unique([companyId, idempotencyKey])
++  /// Composite target so child rows cannot reference another company's import.
++  @@unique([id, companyId])
+   @@index([companyId, status])
+   @@index([externalId])
++  @@index([integrationCredentialId])
++}
++
++/// One row per inbound import line, matched or not. Never silently dropped.
++model OsfImportLine {
++  id                  String                     @id @default(cuid())
++  companyId           String
++  osfImportId         String
++  /// Zero-based position in the inbound payload items array.
++  sourceIndex         Int
++  /// Stable within the import (Cosmo lineKey, typically the SKU).
++  lineKey             String
++  sku                 String
++  descriptionSnapshot String
++  cosmoVendorId       String?
++  brandNameSnapshot   String
++  erp1Priority        String?
++  erp2Priority        String?
++  /// Quantity proposed by Cosmo (TOTAL ORDER QTY at send time). Never edited.
++  quantityProposed    Decimal                    @db.Decimal(18, 4)
++  /// Current staff-reviewed quantity; mirrors RequirementItem.quantityPlanned when linked.
++  quantityPlanned     Decimal                    @db.Decimal(18, 4)
++  mappingStatus       OsfImportLineMappingStatus
++  brandId             String?
++  productId           String?
++  requirementId       String?
++  requirementItemId   String?                    @unique
++  resolutionNote      String?
++  version             Int                        @default(1)
++  createdAt           DateTime                   @default(now())
++  updatedAt           DateTime                   @updatedAt
++
++  company         Company          @relation(fields: [companyId], references: [id], onDelete: Restrict)
++  osfImport       OsfImport        @relation(fields: [osfImportId, companyId], references: [id, companyId], onDelete: Restrict)
++  brand           Brand?           @relation(fields: [brandId], references: [id], onDelete: Restrict)
++  product         Product?         @relation(fields: [productId], references: [id], onDelete: Restrict)
++  requirement     Requirement?     @relation(fields: [requirementId], references: [id], onDelete: Restrict)
++  requirementItem RequirementItem? @relation(fields: [requirementItemId], references: [id], onDelete: Restrict)
++
++  @@unique([osfImportId, lineKey])
++  @@unique([osfImportId, sourceIndex])
++  @@index([companyId, osfImportId])
++  @@index([osfImportId, mappingStatus])
++  @@index([osfImportId, brandId])
++  @@index([requirementId])
++  @@index([productId])
++}
++
++/// Per-requirement distribution ledger for an import. SUCCEEDED and
++/// SKIPPED_ALREADY_REQUESTED rows are never re-sent by the import retry path.
++model OsfImportDistribution {
++  id             String                      @id @default(cuid())
++  companyId      String
++  osfImportId    String
++  requirementId  String
++  status         OsfImportDistributionStatus
++  /// Random token identifying the current claim holder while IN_PROGRESS.
++  claimToken     String?
++  claimedById    String?
++  claimedAt      DateTime?
++  /// IN_PROGRESS claims past this time may be reclaimed.
++  claimExpiresAt DateTime?
++  attemptCount   Int                         @default(0)
++  /// SupplierRequest ids created by the successful attempt.
++  supplierRequestIds Json?
++  /// Supplier ids that already had an active request (SKIPPED_ALREADY_REQUESTED outcome).
++  alreadyRequestedSupplierIds Json?
++  lastError      String?
++  /// Set when the row reaches SUCCEEDED or SKIPPED_ALREADY_REQUESTED.
++  completedAt    DateTime?
++  version        Int                         @default(1)
++  createdAt      DateTime                    @default(now())
++  updatedAt      DateTime                    @updatedAt
++
++  company     Company     @relation(fields: [companyId], references: [id], onDelete: Restrict)
++  osfImport   OsfImport   @relation(fields: [osfImportId, companyId], references: [id, companyId], onDelete: Restrict)
++  requirement Requirement @relation(fields: [requirementId, companyId], references: [id, companyId], onDelete: Restrict)
++  claimedBy   User?       @relation("OsfImportDistributionClaimedBy", fields: [claimedById], references: [id], onDelete: Restrict)
++
++  @@unique([osfImportId, requirementId])
++  @@index([companyId, status])
++  @@index([osfImportId, status])
++  @@index([requirementId])
++  @@index([status, claimExpiresAt])
++}
++
++/// Server-to-server credential bound to one Portal company and one Cosmo tenant.
++/// Multiple active rows per binding are allowed for zero-downtime token rotation.
++model IntegrationCredential {
++  id             String    @id @default(cuid())
++  companyId      String
++  /// Cosmo tenant id this credential may act for. Inbound cosmoCompanyId must match.
++  cosmoCompanyId String
++  name           String
++  /// SHA-256 hex of the bearer token. Plain token is never stored.
++  tokenHash      String    @unique
++  /// Non-secret prefix shown to staff for identification.
++  tokenPrefix    String
++  isActive       Boolean   @default(true)
++  expiresAt      DateTime?
++  lastUsedAt     DateTime?
++  revokedAt      DateTime?
++  revokedById    String?
++  createdById    String?
++  createdAt      DateTime  @default(now())
++  updatedAt      DateTime  @updatedAt
++
++  company   Company     @relation(fields: [companyId], references: [id], onDelete: Restrict)
++  createdBy User?       @relation("IntegrationCredentialCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
++  revokedBy User?       @relation("IntegrationCredentialRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict)
++  osfImports OsfImport[]
++
++  @@index([companyId, cosmoCompanyId, isActive])
+ }
+ 
+ model Requirement {
+@@ -483,9 +644,15 @@ model Requirement {
+   brand       Brand      @relation(fields: [brandId], references: [id], onDelete: Restrict)
+   confirmedBy User?      @relation("RequirementConfirmedBy", fields: [confirmedById], references: [id], onDelete: Restrict)
+ 
+-  items            RequirementItem[]
+-  supplierRequests SupplierRequest[]
++  items                  RequirementItem[]
++  supplierRequests       SupplierRequest[]
++  osfImportLines         OsfImportLine[]
++  osfImportDistributions OsfImportDistribution[]
+ 
++  /// One brand-scoped draft per import. NULL osfImportId (manual) rows are not constrained.
++  @@unique([osfImportId, brandId])
++  /// Composite target for company-safe child FKs.
++  @@unique([id, companyId])
+   @@index([companyId, status])
+   @@index([brandId, status])
+   @@index([osfImportId])
+@@ -505,7 +672,8 @@ model RequirementItem {
+   requirement Requirement @relation(fields: [requirementId], references: [id], onDelete: Restrict)
+   product     Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+ 
+-  requestItems RequestItem[]
++  requestItems  RequestItem[]
++  osfImportLine OsfImportLine?
+ 
+   @@index([requirementId])
+   @@index([productId])

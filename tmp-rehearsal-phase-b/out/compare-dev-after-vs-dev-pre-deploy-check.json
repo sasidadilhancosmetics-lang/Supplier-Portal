@@ -1,0 +1,47 @@
+{
+  "compare": "dev-after -> dev-pre-deploy-check",
+  "existingRowsPreserved": false,
+  "rowProblems": [
+    "ExternalIdentity: 2 existing row(s) changed or removed",
+    "User: 2 existing row(s) changed or removed"
+  ],
+  "rowsAdded": {
+    "ExternalIdentity": 2,
+    "User": 2
+  },
+  "constraints": {
+    "removedOrChanged": [],
+    "added": []
+  },
+  "indexes": {
+    "removedOrChanged": [],
+    "added": []
+  },
+  "columns": {
+    "removedOrChanged": [],
+    "added": []
+  },
+  "enums": {
+    "removedOrChanged": [],
+    "added": []
+  },
+  "migrationsAdded": [],
+  "protectedPoBefore": [
+    {
+      "id": "cmwd93jaif359624852cdf971",
+      "orderNumber": "PO-20261112-E5D42983",
+      "status": "CONFIRMED",
+      "updatedAt": "2026-11-12T03:40:42.127Z",
+      "row_hash": "3a377ea1905d093b17ad172ed66e2dd4"
+    }
+  ],
+  "protectedPoAfter": [
+    {
+      "id": "cmwd93jaif359624852cdf971",
+      "orderNumber": "PO-20261112-E5D42983",
+      "status": "CONFIRMED",
+      "updatedAt": "2026-11-12T03:40:42.127Z",
+      "row_hash": "3a377ea1905d093b17ad172ed66e2dd4"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+// Proposed Prisma fragment — merge into prisma/schema.prisma ONLY after migration approval.
+// Replaces the existing DeliveryStatus enum and Delivery model fields (additive).
+
+enum DeliveryStatus {
+  /// Legacy: supplier claimed physical delivery (past deliveredAt). Holds capacity until verified/rejected.
+  SUBMITTED
+  /// Planned delivery. Holds capacity. Does NOT mean goods were received.
+  SCHEDULED
+  /// Accepted quantity; counts toward verified received totals.
+  VERIFIED
+  /// Does not count toward ordered or verified totals.
+  REJECTED
+  /// Prior schedule replaced by a newer schedule. History only; no capacity hold.
+  SUPERSEDED
+}
+
+model Delivery {
+  id                   String         @id @default(cuid())
+  purchaseOrderId      String
+  companyId            String
+  supplierId           String
+  status               DeliveryStatus @default(SUBMITTED)
+  idempotencyKey       String?
+  /// Legacy physical delivery date (SUBMITTED). Prefer plannedDeliveryAt for SCHEDULED.
+  deliveredAt          DateTime?
+  /// Planned calendar delivery date for SCHEDULED (future allowed in app).
+  plannedDeliveryAt    DateTime?
+  /// Actual company receipt date (today/past Asia/Colombo). Set on verify.
+  receivedAt           DateTime?
+  notes                String?
+  /// Required when this row supersedes a prior SCHEDULED delivery.
+  rescheduleReason     String?
+  supersedesDeliveryId String?
+  verifiedAt           DateTime?
+  verifiedById         String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId, supplierId, companyId], references: [id, supplierId, companyId], onDelete: Restrict)
+  verifiedBy    User?         @relation("DeliveryVerifiedBy", fields: [verifiedById], references: [id], onDelete: Restrict)
+  /// Same-PO lineage: composite FK ties supersede target to this row's purchaseOrderId.
+  supersedes    Delivery?     @relation("DeliveryReschedule", fields: [supersedesDeliveryId, purchaseOrderId], references: [id, purchaseOrderId], onDelete: Restrict)
+  supersededBy  Delivery[]    @relation("DeliveryReschedule")
+
+  items DeliveryItem[]
+  grn   Grn?
+
+  @@unique([purchaseOrderId, idempotencyKey])
+  @@unique([id, purchaseOrderId])
+  @@index([purchaseOrderId, status])
+  @@index([supplierId, status])
+  @@index([companyId])
+  @@index([companyId, status, plannedDeliveryAt])
+  @@index([supplierId, status, plannedDeliveryAt])
+  @@index([supersedesDeliveryId])
+}

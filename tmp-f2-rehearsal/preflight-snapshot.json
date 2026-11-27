@@ -1,0 +1,139 @@
+{
+  "capturedAt": "2026-11-13T07:27:16.677Z",
+  "branchId": "br-morning-glade-b3odmb6e",
+  "supplier": {
+    "n": 2,
+    "ext": 0
+  },
+  "externalIdDupGroups": {
+    "n": 0
+  },
+  "osfImportLineCount": 12,
+  "osfImportLineHash": "bb7478754802fd6533606637b31d6c59c9dfd693ff08d5310b7fe622dfa6ff70",
+  "lines": [
+    {
+      "id": "d1_uat_fixture_mwejps0n_lm",
+      "osfImportId": "d1_uat_fixture_mwejps0n_imp",
+      "companyId": "cmwbze3sbdec61b9a38ebfb8f",
+      "lineKey": "D1UAT-MATCH",
+      "status": "MATCHED_SKU",
+      "proposed": "10.0000",
+      "planned": "10.0000"
+    },
+    {
+      "id": "d1_uat_fixture_mwejps0n_lu",
+      "osfImportId": "d1_uat_fixture_mwejps0n_imp",
+      "companyId": "cmwbze3sbdec61b9a38ebfb8f",
+      "lineKey": "D1UAT-UNK",
+      "status": "UNKNOWN_SKU",
+      "proposed": "4.0000",
+      "planned": "4.0000"
+    },
+    {
+      "id": "d1_uat_fixture_mwejps0n_lub",
+      "osfImportId": "d1_uat_fixture_mwejps0n_imp",
+      "companyId": "cmwbze3sbdec61b9a38ebfb8f",
+      "lineKey": "D1UAT-NOBR",
+      "status": "UNKNOWN_BRAND",
+      "proposed": "2.0000",
+      "planned": "2.0000"
+    },
+    {
+      "id": "d1_uat_fixture_mwejps0n_lz",
+      "osfImportId": "d1_uat_fixture_mwejps0n_imp",
+      "companyId": "cmwbze3sbdec61b9a38ebfb8f",
+      "lineKey": "D1UAT-ZERO",
+      "status": "REJECTED_ZERO_QTY",
+      "proposed": "0.0000",
+      "planned": "0.0000"
+    },
+    {
+      "id": "d1c_mwejlgzc_lu",
+      "osfImportId": "d1c_mwejlgzc_imp",
+      "companyId": "d1c_mwejlgzc_co",
+      "lineKey": "d1c_mwejlgzc-UNK",
+      "status": "MATCHED_SKU",
+      "proposed": "3.0000",
+      "planned": "3.0000"
+    },
+    {
+      "id": "d1c_mwejlgzc_lub",
+      "osfImportId": "d1c_mwejlgzc_imp",
+      "companyId": "d1c_mwejlgzc_co",
+      "lineKey": "d1c_mwejlgzc-NB1",
+      "status": "UNKNOWN_SKU",
+      "proposed": "2.0000",
+      "planned": "2.0000"
+    },
+    {
+      "id": "d1c_mwejlgzc_lub2",
+      "osfImportId": "d1c_mwejlgzc_imp",
+      "companyId": "d1c_mwejlgzc_co",
+      "lineKey": "d1c_mwejlgzc-NB2",
+      "status": "UNKNOWN_SKU",
+      "proposed": "5.0000",
+      "planned": "5.0000"
+    },
+    {
+      "id": "d1c_mwejlgzc_lz",
+      "osfImportId": "d1c_mwejlgzc_imp",
+      "companyId": "d1c_mwejlgzc_co",
+      "lineKey": "d1c_mwejlgzc-ZERO",
+      "status": "UNKNOWN_SKU",
+      "proposed": "0.0000",
+      "planned": "7.0000"
+    },
+    {
+      "id": "d1c_mwejme0m_lu",
+      "osfImportId": "d1c_mwejme0m_imp",
+      "companyId": "d1c_mwejme0m_co",
+      "lineKey": "d1c_mwejme0m-UNK",
+      "status": "MATCHED_SKU",
+      "proposed": "3.0000",
+      "planned": "3.0000"
+    },
+    {
+      "id": "d1c_mwejme0m_lub",
+      "osfImportId": "d1c_mwejme0m_imp",
+      "companyId": "d1c_mwejme0m_co",
+      "lineKey": "d1c_mwejme0m-NB1",
+      "status": "UNKNOWN_SKU",
+      "proposed": "2.0000",
+      "planned": "2.0000"
+    },
+    {
+      "id": "d1c_mwejme0m_lub2",
+      "osfImportId": "d1c_mwejme0m_imp",
+      "companyId": "d1c_mwejme0m_co",
+      "lineKey": "d1c_mwejme0m-NB2",
+      "status": "UNKNOWN_SKU",
+      "proposed": "5.0000",
+      "planned": "5.0000"
+    },
+    {
+      "id": "d1c_mwejme0m_lz",
+      "osfImportId": "d1c_mwejme0m_imp",
+      "companyId": "d1c_mwejme0m_co",
+      "lineKey": "d1c_mwejme0m-ZERO",
+      "status": "UNKNOWN_SKU",
+      "proposed": "0.0000",
+      "planned": "7.0000"
+    }
+  ],
+  "requirementCount": {
+    "n": 9
+  },
+  "osfImportCount": {
+    "n": 5
+  },
+  "supplierRequestCount": {
+    "n": 3
+  },
+  "protectedPo": {
+    "orderNumber": "PO-20261112-E5D42983",
+    "status": "CONFIRMED"
+  },
+  "purchaseOrderCount": {
+    "n": 1
+  }
+}

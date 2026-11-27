@@ -1,0 +1,30 @@
+# Additive schema diff — delivery scheduling (proposed, post-review)
+
+## DeliveryStatus enum
++ SCHEDULED
++ SUPERSEDED
+
+## Delivery model
++ plannedDeliveryAt    DateTime?
++ receivedAt           DateTime?
++ rescheduleReason     String?
++ supersedesDeliveryId String?
++ relation supersedes / supersededBy ("DeliveryReschedule")
+  via composite FK (supersedesDeliveryId, purchaseOrderId) → (id, purchaseOrderId)
++ @@unique([id, purchaseOrderId])
++ @@index([companyId, status, plannedDeliveryAt])
++ @@index([supplierId, status, plannedDeliveryAt])
++ @@index([supersedesDeliveryId])
+
+## DB constraints (SQL)
++ Delivery_supersedes_same_po_fkey (same purchase order)
++ Delivery_supersedes_not_self_check
++ (optional step 2) Delivery_scheduled_requires_planned_date_check
++ (optional step 2) Delivery_reschedule_requires_reason_check
+
+## Unchanged
+- PurchaseOrder, OrderItem (including quantityVerifiedReceived, unitPrice, originalExpectedDeliveryAt)
+- DeliveryItem.quantityDelivered (planned qty for SCHEDULED; claimed qty for legacy SUBMITTED)
+- Grn / GrnItem (immutable, 1:1 with Delivery)
+- StaffPermissionCode VERIFY_DELIVERY / ISSUE_GRN
+- Existing Delivery/GRN row values (migration is additive DDL only)

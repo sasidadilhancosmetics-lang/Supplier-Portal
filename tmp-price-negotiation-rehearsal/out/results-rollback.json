@@ -1,0 +1,120 @@
+{
+  "tests": [
+    {
+      "name": "valid_quote_and_agreement",
+      "pass": true
+    },
+    {
+      "name": "reject_zero_price",
+      "pass": true,
+      "detail": "new row for relation \"PriceQuote\" violates check constraint \"PriceQuote_unitPrice_positive\""
+    },
+    {
+      "name": "reject_cross_company_or_bad_supplier",
+      "pass": true,
+      "detail": "insert or update on table \"PriceQuote\" violates foreign key constraint \"PriceQuote_supplier_company_fkey\""
+    },
+    {
+      "name": "reject_duplicate_agreement_per_offer",
+      "pass": true,
+      "detail": "duplicate key value violates unique constraint \"PriceAgreement_availabilityOfferId_key\""
+    },
+    {
+      "name": "orderitem_quote_fk_allows_set",
+      "pass": true
+    },
+    {
+      "name": "db_allows_agreement_quote_offer_mismatch_APP_MUST_REJECT",
+      "pass": true,
+      "detail": "Inserted mismatched agreement/quote — application transaction check required"
+    },
+    {
+      "name": "status_transitions_APP_ENFORCED",
+      "pass": true,
+      "detail": "No CHECK on allowed status graph; allocate must reject QUOTED/COUNTER_PENDING/etc."
+    },
+    {
+      "name": "existing_business_data_preserved",
+      "pass": true
+    },
+    {
+      "name": "protected_po_unchanged",
+      "pass": true
+    },
+    {
+      "name": "rollback_removes_new_objects",
+      "pass": true
+    },
+    {
+      "name": "rollback_preserves_business_data",
+      "pass": true
+    }
+  ],
+  "host": "ep-misty-paper-b3wrz0w2.c-4.ap-southeast-1.aws.neon.tech",
+  "branchHint": null,
+  "identity": {
+    "db": "neondb",
+    "addr": "169.254.254.254/32",
+    "migrations": 7
+  },
+  "before": {
+    "offers": 2,
+    "offers_price_null": 2,
+    "order_items": 1,
+    "order_items_price_null": 1,
+    "supplier_requests": 3,
+    "purchase_orders": 1,
+    "protected_po_status": "CONFIRMED",
+    "protected_po_version": 2
+  },
+  "migrate": "applied",
+  "inventory": {
+    "has_price_quote": true,
+    "has_price_agreement": true,
+    "has_channel_enum": true,
+    "orderitem_price_quote_id": true,
+    "named_checks_uniques": 3
+  },
+  "fks": [
+    "OrderItem_priceQuoteId_fkey",
+    "PriceAgreement_availabilityOffer_fkey",
+    "PriceAgreement_companyId_fkey",
+    "PriceAgreement_currentQuoteId_fkey",
+    "PriceAgreement_productId_fkey",
+    "PriceAgreement_requestItem_fkey",
+    "PriceAgreement_supplier_company_fkey",
+    "PriceQuote_attestedByUserId_fkey",
+    "PriceQuote_availabilityOffer_fkey",
+    "PriceQuote_companyId_fkey",
+    "PriceQuote_productId_fkey",
+    "PriceQuote_recordedByUserId_fkey",
+    "PriceQuote_requestItem_fkey",
+    "PriceQuote_supersedesQuoteId_fkey",
+    "PriceQuote_supplierRequest_fkey",
+    "PriceQuote_supplier_company_fkey"
+  ],
+  "after": {
+    "offers": 2,
+    "offers_price_null": 2,
+    "order_items": 1,
+    "order_items_price_null": 1,
+    "supplier_requests": 3,
+    "purchase_orders": 1,
+    "price_quotes": 0,
+    "price_agreements": 0,
+    "protected_po_status": "CONFIRMED",
+    "protected_po_version": 2
+  },
+  "dataPreserved": true,
+  "rollback": {
+    "quote_gone": true,
+    "agreement_gone": true,
+    "channel_exists": false,
+    "oi_col_exists": false,
+    "protected_po_status": "CONFIRMED",
+    "offers": 2,
+    "order_items": 1
+  },
+  "ok": true,
+  "failed": []
+}
