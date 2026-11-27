@@ -76,12 +76,12 @@ async function AccessPendingContent() {
         >
           Home
         </Link>
-        <Link
+        <a
           href="/auth/logout"
           className={cn(buttonVariants({ variant: "outline", className: "min-h-11" }))}
         >
           Log out
-        </Link>
+        </a>
       </div>
       <p className="text-sm text-muted-foreground">
         Already invited to an existing supplier company? Use your invitation

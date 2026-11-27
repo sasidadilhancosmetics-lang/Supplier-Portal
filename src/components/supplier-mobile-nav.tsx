@@ -151,7 +151,7 @@ export function SupplierMobileNav({
                 </ul>
               </nav>
               <div className="shrink-0 border-t border-border p-3">
-                <Link
+                <a
                   href="/auth/logout"
                   onClick={close}
                   className={cn(
@@ -162,7 +162,7 @@ export function SupplierMobileNav({
                   )}
                 >
                   Log out
-                </Link>
+                </a>
               </div>
             </Dialog.Popup>
           </Dialog.Portal>

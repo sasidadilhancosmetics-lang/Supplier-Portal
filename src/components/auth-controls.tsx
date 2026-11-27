@@ -36,14 +36,14 @@ export function AuthControls({ auth }: AuthControlsProps) {
         <p className="truncate text-sm font-medium">{label}</p>
         <p className="truncate text-xs text-muted-foreground">{detail}</p>
       </div>
-      <Link
+      <a
         href="/auth/logout"
         className={cn(
           buttonVariants({ variant: "outline", className: "min-h-11" }),
         )}
       >
         Log out
-      </Link>
+      </a>
     </div>
   );
 }

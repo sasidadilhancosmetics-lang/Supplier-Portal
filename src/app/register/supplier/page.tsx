@@ -68,12 +68,12 @@ export default async function RegisterSupplierPage() {
           >
             Access status
           </Link>
-          <Link
+          <a
             href="/auth/logout"
             className={cn(buttonVariants({ className: "min-h-11" }))}
           >
             Log out
-          </Link>
+          </a>
         </div>
       </div>
     );

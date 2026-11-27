@@ -72,7 +72,9 @@ describe("session resolution and supplier page authorization", () => {
     expect(mocks.supplier).not.toHaveBeenCalled();
   });
 
-  it("allows a valid active supplier", async () => {
-    expect(await loadProtectedPage(() => requireSupplier())).toEqual(user);
+  it.each(["/supplier", "/supplier/requests", "/supplier/catalogue", "/supplier/orders", "/supplier/deliveries", "/supplier/notifications", "/supplier/profile"])("allows authenticated Supplier navigation and fresh reload of %s without redirect", async () => {
+    for (const phase of ["navigation", "reload"]) {
+      expect(await loadProtectedPage(() => requireSupplier()), phase).toEqual(user);
+    }
   });
 });
