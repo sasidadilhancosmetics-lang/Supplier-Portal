@@ -1,3 +1,4 @@
+import { loadProtectedPage } from "@/lib/auth/page";
 import type { Metadata } from "next";
 
 import {
@@ -21,7 +22,7 @@ export const metadata: Metadata = {
 export const instant = false;
 
 export default async function SupplierHomePage() {
-  const data = await getSupplierDashboard();
+  const data = await loadProtectedPage(() => getSupplierDashboard());
   const attentionCount = data.actionRequired.counts.actionRequired;
   const hasUpcoming = data.upcomingDeliveries.length > 0;
   const hasRecentOrders = data.recentOrders.length > 0;
