@@ -1,3 +1,4 @@
+import { loadProtectedPage } from "@/lib/auth/page";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -15,7 +16,7 @@ type DeliveryRow = Awaited<
 >[number];
 
 export default async function SupplierDeliveriesPage() {
-  const rows = await listSupplierDeliverableOrders();
+  const rows = await loadProtectedPage(() => listSupplierDeliverableOrders());
   const actionNeeded = rows.filter((r) => Number(r.remainingDeliverable) > 0);
   const upcoming = rows.filter((r) => r.scheduledCount > 0);
   const overdueAction = actionNeeded.filter((r) => r.isOverdue);

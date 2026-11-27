@@ -1,3 +1,4 @@
+import { loadProtectedPage } from "@/lib/auth/page";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -18,7 +19,7 @@ export const metadata: Metadata = {
 export const instant = false;
 
 export default async function SupplierNotificationsPage() {
-  const rows = await listNotificationsForCurrentSupplier();
+  const rows = await loadProtectedPage(() => listNotificationsForCurrentSupplier());
   const unreadCount = rows.filter((row) => row.status === "UNREAD").length;
 
   return (

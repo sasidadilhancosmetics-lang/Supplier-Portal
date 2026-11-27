@@ -1,3 +1,5 @@
+import { reportAuthDiagnostic } from "./diagnostics";
+
 export type AuthErrorCode = "UNAUTHENTICATED" | "FORBIDDEN" | "NOT_FOUND";
 
 /**
@@ -12,6 +14,7 @@ export class AuthorizationError extends Error {
     super(message);
     this.name = "AuthorizationError";
     this.code = code;
+    if (code === "FORBIDDEN") reportAuthDiagnostic("authorization_denied");
     this.status =
       code === "UNAUTHENTICATED" ? 401 : code === "NOT_FOUND" ? 404 : 403;
   }

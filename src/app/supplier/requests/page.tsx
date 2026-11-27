@@ -1,3 +1,4 @@
+import { rethrowPageAuthError } from "@/lib/auth/page";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
@@ -55,6 +56,7 @@ async function RequestList({
       status: statusParam,
     });
   } catch (error) {
+    rethrowPageAuthError(error);
     return (
       <p role="alert" className="text-sm text-destructive">
         {isRequestDomainError(error)

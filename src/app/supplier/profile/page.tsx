@@ -1,3 +1,4 @@
+import { loadProtectedPage } from "@/lib/auth/page";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -16,7 +17,7 @@ export const metadata: Metadata = {
 export const instant = false;
 
 export default async function SupplierProfilePage() {
-  const { supplier, brands } = await getOwnSupplierProfile();
+  const { supplier, brands } = await loadProtectedPage(() => getOwnSupplierProfile());
 
   return (
     <div className="flex flex-col gap-8">

@@ -1,3 +1,4 @@
+import { loadProtectedPage } from "@/lib/auth/page";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -15,7 +16,7 @@ export default async function CataloguePage({ searchParams }: {
   const search = typeof params.q === "string" ? params.q.trim().slice(0, 100) : "";
   const number = Number(params.page);
   const page = Number.isInteger(number) ? Math.min(1000, Math.max(1, number)) : 1;
-  const { importId, products, hasMore } = await listSupplierCatalogue(search, page);
+  const { importId, products, hasMore } = await loadProtectedPage(() => listSupplierCatalogue(search, page));
   const pageHref = (value: number) => `/supplier/catalogue?${new URLSearchParams({ q: search, page: String(value) })}`;
   return (
     <div className="min-w-0 space-y-5">

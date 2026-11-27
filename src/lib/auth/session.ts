@@ -2,6 +2,7 @@ import "server-only";
 
 import { getAuth0Session } from "@/lib/auth/auth0-session";
 import { prisma } from "@/lib/db";
+import { reportAuthDiagnostic } from "./diagnostics";
 
 import type { AuthState, ProvisionedAppUser } from "./types";
 
@@ -36,12 +37,9 @@ function toAppUser(user: {
  * Callers in shared layouts must wrap this behind <Suspense>.
  */
 export async function getAuthState(): Promise<AuthState> {
-  let session;
-  try {
-    session = await getAuth0Session();
-  } catch {
-    return { status: "anonymous" };
-  }
+  // Session-read failures are operational errors, not proof of logout. Keep
+  // Next.js request/prerender control flow outside an anonymous fallback too.
+  const session = await getAuth0Session();
 
   if (!session?.user?.sub) {
     return { status: "anonymous" };
@@ -64,6 +62,7 @@ export async function getAuthState(): Promise<AuthState> {
   const issuer = issuerFromToken ?? issuerFromEnv;
 
   if (!issuer) {
+    reportAuthDiagnostic("application_issuer_missing");
     return pending();
   }
 
@@ -83,10 +82,12 @@ export async function getAuthState(): Promise<AuthState> {
     });
   } catch {
     // Table missing or DB unavailable — never invent a provisioned user.
+    reportAuthDiagnostic("application_user_lookup_failed");
     return pending();
   }
 
   if (!identity || !identity.user.isActive) {
+    reportAuthDiagnostic("application_user_missing_or_inactive");
     return pending();
   }
 
