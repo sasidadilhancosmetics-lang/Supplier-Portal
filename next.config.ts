@@ -4,6 +4,8 @@ const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
   partialPrefetching: true,
+  // Keep Flight headers visible so the proxy can reject background logout.
+  skipProxyUrlNormalize: true,
   turbopack: {
     rules: {
       "*.css": {
