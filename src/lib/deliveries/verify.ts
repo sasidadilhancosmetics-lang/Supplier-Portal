@@ -509,7 +509,12 @@ async function verifyOnce(
       });
       return result;
     },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    {
+      isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      // Receipt + immutable GRN/audit/notifications require several Neon round trips.
+      // Match the bounded budget already used by PO allocation and confirmation.
+      timeout: 20_000,
+    },
   );
 }
 
