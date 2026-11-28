@@ -138,7 +138,7 @@ export function activeCompanyDestination(pathname: string, items: readonly NavIt
     return items.find(({ href }) => href === "/staff/requests");
   }
   return items.find(({ href }) =>
-    href !== "/admin" && href !== "/staff" && normalized.startsWith(`${href}/`));
+    href !== "/admin" && href !== "/staff" && href !== "/supplier" && normalized.startsWith(`${href}/`));
 }
 
 /** Default dashboard path after login for a provisioned user. */

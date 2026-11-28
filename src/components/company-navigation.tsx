@@ -18,6 +18,10 @@ const iconPaths: Record<string, string> = {
   Dashboard: "M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z",
   "Supplier Management": "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m20 0v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z",
   Products: "M21 8l-9 5-9-5m9 5v9m9-14-9-5-9 5v9l9 5 9-5zM7.5 5.5l9 5",
+  Catalogue: "M21 8l-9 5-9-5m9 5v9m9-14-9-5-9 5v9l9 5 9-5zM7.5 5.5l9 5",
+  Requests: "M4 4h16v13H8l-4 4zM8 8h8m-8 4h5",
+  Orders: "M6 7h12l2 14H4zM9 9V6a3 3 0 0 1 6 0v3",
+  Profile: "M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2m12-14a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z",
   "OSF Imports": "M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4",
   Requirements: "M9 4H5v17h14V4h-4m-6 0a3 3 0 0 1 6 0v2H9zM8 11h8m-8 5h8",
   "Supplier Requests": "M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5Z",
@@ -34,7 +38,6 @@ const iconPaths: Record<string, string> = {
 };
 
 const desktopQuery = "(min-width: 64rem)";
-const collapsePreferenceKey = "supplier-portal:company-sidebar-collapsed";
 const buttonClass = "inline-flex size-11 shrink-0 items-center justify-center rounded-lg hover:bg-secondary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 function Icon({ name }: { name: string }) {
@@ -46,15 +49,16 @@ function Icon({ name }: { name: string }) {
   );
 }
 
-function CompanyLinks({ groups, current, compact, onNavigate, id }: {
+function SidebarLinks({ groups, current, compact, onNavigate, id, label }: {
   groups: ReturnType<typeof groupCompanySidebar>;
   current?: string;
   compact?: boolean;
   onNavigate?: () => void;
   id?: string;
+  label: string;
 }) {
   return (
-    <nav id={id} aria-label="Company" className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2">
+    <nav id={id} aria-label={label} className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain p-2">
       {groups.map(({ label, links }) => (
         <div key={label ?? "Dashboard"} className={label ? "border-t border-sidebar-border pt-2" : undefined}>
           {label ? (
@@ -75,6 +79,11 @@ function CompanyLinks({ groups, current, compact, onNavigate, id }: {
                   )}>
                   <Icon name={item.label} />
                   {compact ? null : <span>{item.label}</span>}
+                  {!compact && (item.badgeCount ?? 0) > 0 ? (
+                    <span aria-label={`${item.badgeCount} unread`} className="ms-auto rounded-md bg-primary px-1.5 text-xs text-primary-foreground">
+                      {item.badgeCount! > 99 ? "99+" : item.badgeCount}
+                    </span>
+                  ) : null}
                 </Link>
               );
               return (
@@ -101,25 +110,31 @@ function CompanyLinks({ groups, current, compact, onNavigate, id }: {
   );
 }
 
-export function CompanyNavigation({ auth, navItems, pathname, homeHref }: {
+export function WorkspaceNavigation({ auth, navItems, pathname, homeHref, workspace = "company" }: {
   auth: Extract<AuthState, { status: "provisioned" }>;
   navItems: readonly NavItem[];
   pathname: string;
   homeHref: string;
+  workspace?: "company" | "supplier";
 }) {
+  const label = workspace === "supplier" ? "Supplier" : "Company";
+  const collapsePreferenceKey = `supplier-portal:${workspace}-sidebar-collapsed`;
+  const linksId = `${workspace}-sidebar-links`;
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState(false);
   const closeRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLButtonElement>(null);
   const collapseRef = useRef<HTMLButtonElement>(null);
   const previousPathname = useRef(pathname);
-  const notifications = navItems.find((item) => item.href === "/staff/notifications");
+  const notifications = navItems.find((item) => item.href === (workspace === "supplier" ? "/supplier/notifications" : "/staff/notifications"));
   const unread = notifications?.badgeCount ?? 0;
-  const groups = groupCompanySidebar(navItems, pathname);
+  const groups = workspace === "supplier"
+    ? [{ label: null, links: [...navItems] }]
+    : groupCompanySidebar(navItems, pathname);
   const sidebarItems = groups.flatMap(({ links }) => links);
   const active = activeCompanyDestination(pathname, notifications ? [...sidebarItems, notifications] : sidebarItems);
   const account = auth.user.name ?? auth.user.email;
-  const context = active?.label ?? (pathname === "/staff" ? "Dashboard" : "Company workspace");
+  const context = active?.label ?? (pathname === "/staff" ? "Dashboard" : `${label} workspace`);
 
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
@@ -130,7 +145,7 @@ export function CompanyNavigation({ auth, navItems, pathname, homeHref }: {
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [collapsePreferenceKey]);
 
   function toggleSidebar() {
     const next = !collapsed;
@@ -171,33 +186,33 @@ export function CompanyNavigation({ auth, navItems, pathname, homeHref }: {
             className={cn(buttonClass, collapsed ? "" : "w-auto min-w-0 flex-1 justify-start px-1")}>
             <BrandLogo variant={collapsed ? "mark" : "full"} size="sm" decorative />
           </Link>
-          <button ref={collapseRef} type="button" aria-controls="company-sidebar-links" aria-expanded={!collapsed}
+          <button ref={collapseRef} type="button" aria-controls={linksId} aria-expanded={!collapsed}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             className={buttonClass} onClick={toggleSidebar}>
             <Icon name={collapsed ? "Expand" : "Collapse"} />
           </button>
         </div>
-        <CompanyLinks id="company-sidebar-links" groups={groups} current={active?.href} compact={collapsed} />
+        <SidebarLinks id={linksId} label={label} groups={groups} current={active?.href} compact={collapsed} />
       </aside>
 
       <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-sm">
         <div className="mx-auto flex min-h-14 w-full max-w-5xl items-center gap-1 px-3 sm:gap-3 sm:px-4">
           <Dialog.Root modal open={open} onOpenChange={setOpen}>
-            <Dialog.Trigger ref={menuRef} aria-label="Open company menu" className={cn(buttonClass, "lg:hidden")}>
+            <Dialog.Trigger ref={menuRef} aria-label={`Open ${workspace} menu`} className={cn(buttonClass, "lg:hidden")}>
               <Icon name="Menu" />
             </Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Backdrop className="company-drawer-backdrop fixed inset-0 z-50 bg-background/80" />
               <Dialog.Popup initialFocus={closeRef}
                 finalFocus={() => window.matchMedia(desktopQuery).matches ? collapseRef.current : menuRef.current}
-                className="company-drawer fixed inset-y-0 start-0 z-50 flex w-full max-w-[min(18rem,85vw)] flex-col border-e border-sidebar-border bg-sidebar shadow-lg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+                className="company-drawer fixed inset-y-0 start-0 z-50 flex w-full max-w-[min(18rem,85vw)] flex-col border-e border-sidebar-border bg-sidebar shadow-lg pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] ps-[env(safe-area-inset-left)]">
                 <div className="flex shrink-0 items-center justify-between border-b border-sidebar-border px-3 py-1">
-                  <Dialog.Title className="px-1 text-sm font-semibold">Company navigation</Dialog.Title>
-                  <Dialog.Close ref={closeRef} aria-label="Close company menu" className={buttonClass}>
+                  <Dialog.Title className="px-1 text-sm font-semibold">{label} navigation</Dialog.Title>
+                  <Dialog.Close ref={closeRef} aria-label={`Close ${workspace} menu`} className={buttonClass}>
                     <Icon name="Close" />
                   </Dialog.Close>
                 </div>
-                <CompanyLinks groups={groups} current={active?.href} onNavigate={() => setOpen(false)} />
+                <SidebarLinks label={label} groups={groups} current={active?.href} onNavigate={() => setOpen(false)} />
               </Dialog.Popup>
             </Dialog.Portal>
           </Dialog.Root>
@@ -237,3 +252,5 @@ export function CompanyNavigation({ auth, navItems, pathname, homeHref }: {
     </>
   );
 }
+
+export { WorkspaceNavigation as CompanyNavigation };

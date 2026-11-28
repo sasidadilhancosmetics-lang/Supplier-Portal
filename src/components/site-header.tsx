@@ -5,8 +5,7 @@ import { usePathname } from "next/navigation";
 
 import { AuthControls } from "@/components/auth-controls";
 import { BrandLogo } from "@/components/brand-logo";
-import { CompanyNavigation } from "@/components/company-navigation";
-import { SupplierMobileNav } from "@/components/supplier-mobile-nav";
+import { WorkspaceNavigation } from "@/components/company-navigation";
 import type { AuthState } from "@/lib/auth/types";
 import type { NavItem } from "@/lib/auth/nav";
 import { cn } from "@/lib/utils";
@@ -39,57 +38,38 @@ function homeHrefForAuth(auth: AuthState) {
 export function SiteHeader({ auth, navItems }: SiteHeaderProps) {
   const pathname = usePathname();
   const homeHref = homeHrefForAuth(auth);
-  const isSupplier =
-    auth.status === "provisioned" && auth.user.role === "SUPPLIER";
 
   if (
     auth.status === "provisioned" &&
     (auth.user.role === "ADMIN" || auth.user.role === "STAFF") &&
     ["/admin", "/staff"].some((area) => pathname === area || pathname.startsWith(`${area}/`))
   ) {
-    return <CompanyNavigation auth={auth} navItems={navItems} pathname={pathname} homeHref={homeHref} />;
+    return <WorkspaceNavigation auth={auth} navItems={navItems} pathname={pathname} homeHref={homeHref} />;
+  }
+
+  if (auth.status === "provisioned" && auth.user.role === "SUPPLIER" &&
+    (pathname === "/supplier" || pathname.startsWith("/supplier/"))) {
+    return <WorkspaceNavigation auth={auth} navItems={navItems} pathname={pathname} homeHref={homeHref} workspace="supplier" />;
   }
 
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-sm">
       <div className="mx-auto w-full max-w-5xl px-4 py-3 sm:py-4">
-        {isSupplier ? (
-          <>
-            <SupplierMobileNav homeHref={homeHref} navItems={navItems} />
-            {/* Desktop supplier nav */}
-            <div className="hidden items-center justify-between gap-4 md:flex">
-              <div className="flex min-w-0 items-center gap-6">
-                <Link
-                  href={homeHref}
-                  aria-label="Supplier Portal home"
-                  className="inline-flex w-fit max-w-[13.5rem] items-center rounded-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40"
-                >
-                  <BrandLogo variant="full" size="md" animated decorative />
-                </Link>
-                {navItems.length > 0 ? (
-                  <DesktopNav pathname={pathname} navItems={navItems} />
-                ) : null}
-              </div>
-              <AuthControls auth={auth} />
-            </div>
-          </>
-        ) : (
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
-              <Link
-                href={homeHref}
-                aria-label="Supplier Portal home"
-                className="inline-flex w-fit max-w-[11rem] items-center rounded-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 sm:max-w-[13.5rem]"
-              >
-                <BrandLogo variant="responsive" size="md" animated decorative />
-              </Link>
-              {navItems.length > 0 ? (
-                <DesktopNav pathname={pathname} navItems={navItems} />
-              ) : null}
-            </div>
-            <AuthControls auth={auth} />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-6">
+            <Link
+              href={homeHref}
+              aria-label="Supplier Portal home"
+              className="inline-flex w-fit max-w-[11rem] items-center rounded-md focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/40 sm:max-w-[13.5rem]"
+            >
+              <BrandLogo variant="responsive" size="md" animated decorative />
+            </Link>
+            {navItems.length > 0 ? (
+              <DesktopNav pathname={pathname} navItems={navItems} />
+            ) : null}
           </div>
-        )}
+          <AuthControls auth={auth} />
+        </div>
       </div>
     </header>
   );
