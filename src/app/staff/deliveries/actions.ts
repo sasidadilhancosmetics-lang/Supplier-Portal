@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { isAuthorizationError } from "@/lib/auth/errors";
 import { approveDeliverySchedule } from "@/lib/deliveries/approve";
+import { reportReceiptFailure } from "@/lib/deliveries/diagnostics";
 import { isDeliveryDomainError } from "@/lib/deliveries/errors";
 import { rejectDelivery, verifyDelivery } from "@/lib/deliveries/verify";
 
@@ -62,6 +63,7 @@ export async function verifyDeliveryAction(
   _prev: VerifyDeliveryActionResult | undefined,
   formData: FormData,
 ): Promise<VerifyDeliveryActionResult> {
+  let phase: "verify" | "revalidate_after_commit" = "verify";
   try {
     const deliveryItemIds = formData.getAll("deliveryItemId").map(String);
     const quantities = formData.getAll("quantityReceived").map(String);
@@ -78,6 +80,7 @@ export async function verifyDeliveryAction(
       lines,
     });
 
+    phase = "revalidate_after_commit";
     revalidateDeliveryPaths(result.deliveryId, result.purchaseOrderId);
     return {
       ok: true,
@@ -98,6 +101,7 @@ export async function verifyDeliveryAction(
         fieldErrors: error.fieldErrors,
       };
     }
+    reportReceiptFailure(error, phase);
     return { ok: false, message: "Something went wrong. Please try again." };
   }
 }
