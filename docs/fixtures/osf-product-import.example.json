@@ -1,0 +1,26 @@
+{
+  "contractVersion": "cosmo-osf-push.v1",
+  "idempotencyKey": "osf-products-development-acceptance-001",
+  "source": {
+    "system": "cosmo-os",
+    "cosmoCompanyId": "synthetic-cosmo-company",
+    "sentAt": "2026-11-28T09:00:00.000Z"
+  },
+  "selection": { "mode": "SUPPLIER_ORDERS_SELECTION" },
+  "items": [
+    {
+      "lineKey": "OSF-UAT-PRODUCT-001",
+      "sku": "OSF-UAT-PRODUCT-001",
+      "description": "Synthetic OSF product one",
+      "brand": { "cosmoVendorId": "synthetic-vendor-001", "name": "OSF UAT Synthetic Brand" },
+      "quantity": { "totalOrderQty": 2 }
+    },
+    {
+      "lineKey": "OSF-UAT-PRODUCT-002",
+      "sku": "OSF-UAT-PRODUCT-002",
+      "description": "Synthetic OSF product two",
+      "brand": { "cosmoVendorId": "synthetic-vendor-001", "name": "OSF UAT Synthetic Brand" },
+      "quantity": { "totalOrderQty": 3 }
+    }
+  ]
+}

@@ -3,6 +3,12 @@ import { NextResponse } from "next/server";
 import { CosmoIngestError, cosmoErrorResponse } from "@/lib/integrations/cosmo/errors";
 import { ingestCosmoOsfRequirementImport } from "@/lib/integrations/cosmo/ingest";
 
+const allowedErrorTypes = new Set([
+  "Error", "TypeError", "RangeError", "ReferenceError",
+  "PrismaClientKnownRequestError", "PrismaClientUnknownRequestError",
+  "PrismaClientValidationError", "PrismaClientInitializationError", "PrismaClientRustPanicError",
+]);
+
 /**
  * Cosmo OS → Portal OSF ingest (cosmo-osf-push.v1).
  * Auth: IntegrationCredential Bearer. companyId from credential only.
@@ -28,10 +34,11 @@ export async function POST(request: Request) {
         status: error.httpStatus,
       });
     }
-    console.error("cosmo osf ingest failed", {
-      name: error instanceof Error ? error.name : "unknown",
-      message: error instanceof Error ? error.message : "unknown",
-    });
+    // Messages/stacks can contain credentials, query arguments or inbound data.
+    const errorType = error instanceof Error && allowedErrorTypes.has(error.name) ? error.name : "UnknownError";
+    const code = error != null && typeof error === "object" && "code" in error &&
+      typeof error.code === "string" && /^P\d{4}$/.test(error.code) ? error.code : "UNCLASSIFIED";
+    console.error("cosmo osf ingest failed", { errorType, code });
     return NextResponse.json(
       cosmoErrorResponse(
         new CosmoIngestError(
